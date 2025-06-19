@@ -1,8 +1,7 @@
 // ===== 전역 설정 Code.gs ===== 
 
 const CONFIG = {
-  PRODUCT_SHEET_ID: '1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E',
-  ORDER_SHEET_ID: '1eTIFbWZupx4BhX-PUmgXBNCx-l0BEsLG7GinlCGTNSA',
+  PRODUCT_SHEET_ID: '1k0SfvjUEvJgXgyAEufQin7EBTnqgghkCeuQdOCkcMoQ',
   PRODUCT_SHEET_NAME: '상품목록',
   CATEGORY_SHEET_NAME: 'category',
   MAX_SEARCH_RESULTS: 100,
