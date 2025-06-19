@@ -1,16 +1,5 @@
 // ===== dashboard.gs - 대시보드 데이터 통합 및 최적화 =====
 
-// CONFIG 추가 (파일 상단에 추가)
-const CONFIG = {
-  PRODUCT_SHEET_ID: '1k0SfvjUEvJgXgyAEufQin7EBTnqgghkCeuQdOCkcMoQ',
-  ORDER_SHEET_ID: '1fYBl88flaa-xOt0TT_0fNBQNqVOvUu4WUlQIreW7mPM',
-  PRODUCT_SHEET_NAME: '상품목록',
-  CATEGORY_SHEET_NAME: 'category',
-  MAX_SEARCH_RESULTS: 100,
-  CACHE_DURATION: 3600,
-  FREQUENT_ITEMS_COUNT: 1000
-};
-
 // ===== 메인 대시보드 데이터 함수 (API 통합) =====
 function getDashboardData() {
   try {
