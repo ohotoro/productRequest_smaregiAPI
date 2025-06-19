@@ -15,7 +15,9 @@ const CACHE_KEYS = {
   SMAREGI_DATA: 'smaregiData',
   SMAREGI_TIMESTAMP: 'smaregiTimestamp',
   DASHBOARD_DATA: 'dashboardData',
-  BOX_BARCODES: 'box_barcodes'
+  BOX_BARCODES: 'box_barcodes',
+  SUPPLIER_MAP: 'supplierMap',
+  TOP_PRODUCTS: 'topProducts'
 };
 
 const CACHE_DURATION = {
