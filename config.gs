@@ -3,7 +3,7 @@
 // 기본 설정
 const CONFIG = {
   // 스프레드시트 ID
-  PRODUCT_SHEET_ID: '1k0SfvjUEvJgXgyAEufQin7EBTnqgghkCeuQdOCkcMoQ',
+  PRODUCT_SHEET_ID: '1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E',
   ORDER_SHEET_ID: '1fYBl88flaa-xOt0TT_0fNBQNqVOvUu4WUlQIreW7mPM',
   
   // 시트 이름
