@@ -24,10 +24,34 @@ const CONFIG = {
   SMAREGI: {
     CONTRACT_ID: 'skuv592u8',
     ACCESS_TOKEN: '78a128116eda101dac5eeb3bb0546c28',
-    API_BASE_URL: 'https://api.smaregi.jp/v2/',
-    TIMEOUT: 30000 // 30초
+    API_BASE_URL: 'https://webapi.smaregi.jp/access/',
+    TIMEOUT: 30000
+  },
+  
+  // Smaregi プラットフォームAPI 설정 (추가) ← 여기!
+  PLATFORM_CONFIG: {
+    CONTRACT_ID: 'skuv592u8',
+    
+    // 開発環境 (테스트용)
+    DEV_CLIENT_ID: '5436f7f654c4efa5d2a1f56355c5bca1',
+    DEV_CLIENT_SECRET: 'b55417971e428d55f64eb3bcbb8f9a9f3a4361cdc3ef2fb835051e3d3fb59e10',
+    
+    // 本番環境 (나중에 설정)
+    PROD_CLIENT_ID: 'add65344a30e3d0b0893fe972702a7b4',
+    PROD_CLIENT_SECRET: '',
+    
+    // 현재 사용할 환경 선택
+    USE_PRODUCTION: false,
+    
+    // API 엔드포인트
+    TOKEN_URL: 'https://id.smaregi.jp/app/',
+    DEV_API_BASE_URL: 'https://api.smaregi.dev/',
+    PROD_API_BASE_URL: 'https://api.smaregi.jp/',
+    
+    // 권한 스코프
+    SCOPES: 'pos.products:read pos.stocks:read pos.stores:read'
   }
-};
+}; 
 
 // 발주서 열 인덱스 정의 (0부터 시작)
 const ORDER_COLUMNS = {
