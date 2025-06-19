@@ -36,9 +36,13 @@
       <div class="order-actions">
         <button id="create-order-btn" class="btn btn-primary">새 발주서 생성</button>
         <button id="open-order-btn" class="btn btn-secondary">기존 발주서 열기</button>
-        <button id="upload-smaregi-btn" class="btn btn-secondary" onclick="showSmaregiUploadModal()">
-          <span style="margin-right: 4px;">🏪</span> Smaregi CSV
-        </button>
+        <div class="smaregi-status" id="smaregi-status">
+          <span class="status-icon" id="smaregi-status-icon">⚡</span>
+          <span class="status-text" id="smaregi-status-text">API 연결 확인중...</span>
+          <button class="btn btn-sm" onclick="refreshSmaregiConnection()">
+            <span style="margin-right: 4px;">🔄</span> 새로고침
+          </button>
+        </div>
         <button class="btn btn-secondary" onclick="showBulkStockEditModal()" id="bulk-stock-edit-btn" style="display:none;">
           <span style="margin-right: 4px;">📦</span> 재고 상태 변경
         </button>
@@ -52,49 +56,6 @@
       </div>
     </div>
   </div>
-
-<!-- Smaregi CSV 업로드 모달 -->
-<div id="smaregi-upload-modal" class="modal">
-  <div class="modal-content">
-    <span class="modal-close" onclick="closeModal('smaregi-upload-modal')">&times;</span>
-    <h3>Smaregi CSV 업로드</h3>
-    
-    <div class="smaregi-info">
-      <div class="info-card">
-        <h4>📊 Smaregi CSV란?</h4>
-        <p>매장의 현재 재고 데이터를 업로드하여 발주 시 참고할 수 있습니다.</p>
-      </div>
-      <div class="upload-status">
-        <p><strong>마지막 업데이트:</strong> <span id="last-smaregi-upload">없음</span></p>
-        <p><strong>데이터 유효기간:</strong> 업로드 후 24시간</p>
-      </div>
-    </div>
-    
-    <div class="upload-area" id="smaregi-drop-zone">
-      <div class="upload-icon">📁</div>
-      <p>Smaregi CSV 파일을 드래그하거나 클릭하여 선택</p>
-      <input type="file" id="smaregi-file-input" accept=".csv" style="display: none;">
-    </div>
-    
-    <div class="csv-format-guide">
-      <h5>CSV 형식</h5>
-      <code>바코드,현재재고수량</code>
-      <small>예: 4901234567890,15</small>
-    </div>
-    
-    <div class="upload-preview" id="smaregi-preview" style="display: none;">
-      <h4>미리보기</h4>
-      <div id="smaregi-preview-content"></div>
-    </div>
-    
-    <div class="modal-actions">
-      <button id="process-smaregi-btn" class="btn btn-primary" disabled onclick="processSmaregiUpload()">
-        매장 재고 업데이트
-      </button>
-      <button class="btn btn-secondary" onclick="closeModal('smaregi-upload-modal')">취소</button>
-    </div>
-  </div>
-</div>
 
   <!-- 재고 업로드 모달 -->
 <div id="stock-upload-modal" class="modal">
@@ -262,22 +223,85 @@
     <div class="order-header">
       <h2>발주 목록</h2>
       <div class="order-actions">
-        <button class="btn btn-secondary issue-btn" onclick="openProductIssueModal()" title="제품 이슈사항">
-          <span style="margin-right: 4px;">⚠️</span> 이슈 관리
+        <button id="create-order-btn" class="btn btn-primary">새 발주서 생성</button>
+        <button id="open-order-btn" class="btn btn-secondary">기존 발주서 열기</button>
+        
+        <!-- Smaregi CSV 버튼 삭제, API 상태로 교체 -->
+        <div class="smaregi-status" id="smaregi-status">
+          <span class="status-icon" id="smaregi-status-icon">⚡</span>
+          <span class="status-text" id="smaregi-status-text">API 연결 확인중...</span>
+          <button class="btn btn-sm" onclick="refreshSmaregiConnection()">
+            <span style="margin-right: 4px;">🔄</span> 새로고침
+          </button>
+        </div>
+        
+        <button class="btn btn-secondary" onclick="showBulkStockEditModal()" id="bulk-stock-edit-btn" style="display:none;">
+          <span style="margin-right: 4px;">📦</span> 재고 상태 변경
         </button>
+        
         <span class="divider">|</span>
-        <button id="save-draft-btn" class="btn btn-secondary" disabled>임시 저장</button>
-        <button id="confirm-selected-btn" class="btn btn-primary" disabled>선택 확정</button>
-        <button id="confirm-all-btn" class="btn btn-primary" disabled>전체 확정</button>
-        <!-- CSV 내보내기 버튼 추가 -->
-        <button id="export-csv-btn" class="btn btn-success" onclick="showExportModal()" disabled>
-          <span style="margin-right: 4px;">📥</span> CSV 내보내기
+        
+        <!-- 재고 CSV는 그대로 유지! -->
+        <button id="upload-stock-btn" class="btn btn-secondary" onclick="showStockUploadModal()">
+          <span style="margin-right: 4px;">📊</span> 재고 업로드
         </button>
-        <button class="btn btn-secondary btn-sm" onclick="showSortMenu()" style="padding: 8px 18px; font-size: 14px; font-weight: 500; border: none; border-radius: 4px; cursor: pointer; transition: all .2s; outline: none; ">
-          <i class="fas fa-sort"></i> 정렬
+        
+        <!-- AI 발주 제안 추가 -->
+        <button id="auto-suggest-btn" class="btn btn-secondary" onclick="showAutoSuggestions()">
+          <span style="margin-right: 4px;">🤖</span> 자동 발주 제안
         </button>
-        <button id="clear-btn" style="background: #d30000; color: #fff; " class="btn btn-secondary" disabled>초기화</button>
+        
+        <button id="merge-items-btn" class="btn btn-secondary" onclick="mergeDuplicateItems()">
+          <span style="margin-right: 4px;">🔀</span> 동일상품 합치기
+        </button>
+      </div>
+    </div>
 
+    <!-- 자동 발주 제안 모달 -->
+    <div id="auto-suggest-modal" class="modal">
+      <div class="modal-content">
+        <span class="modal-close" onclick="closeModal('auto-suggest-modal')">&times;</span>
+        <h3>🤖 AI 발주 제안</h3>
+        
+        <div class="suggest-header">
+          <p>재고 현황과 판매 추세를 분석하여 발주가 필요한 상품을 제안합니다.</p>
+          <div class="suggest-stats">
+            <span class="stat-item">
+              <strong>재고 소진:</strong> <span id="out-of-stock-count">0</span>개
+            </span>
+            <span class="stat-item">
+              <strong>재고 부족:</strong> <span id="low-stock-count">0</span>개
+            </span>
+            <span class="stat-item">
+              <strong>긴급 발주:</strong> <span id="urgent-count">0</span>개
+            </span>
+          </div>
+        </div>
+        
+        <div class="suggest-filters">
+          <label>
+            <input type="checkbox" id="filter-urgent" checked> 긴급 발주만
+          </label>
+          <label>
+            <input type="checkbox" id="filter-frequent" checked> 자주 발주 상품
+          </label>
+          <label>
+            <input type="checkbox" id="filter-trending"> 인기 상품
+          </label>
+        </div>
+        
+        <div id="suggest-list" class="suggest-list">
+          <!-- 동적으로 생성될 제안 목록 -->
+        </div>
+        
+        <div class="modal-actions">
+          <button class="btn btn-primary" onclick="addSelectedSuggestions()">
+            선택한 상품 발주서에 추가
+          </button>
+          <button class="btn btn-secondary" onclick="addAllSuggestions()">
+            전체 추가
+          </button>
+        </div>
       </div>
     </div>
     
@@ -426,6 +450,68 @@
       <!-- 긴급 액션 아이템 -->
       <div id="action-items" class="action-items-container"></div>
       
+      <!-- 🆕 Smaregi 실시간 재고 현황 (새로 추가) -->
+      <div class="dashboard-section">
+        <h3>📊 실시간 재고 현황</h3>
+        <div class="smaregi-dashboard" id="smaregi-dashboard">
+          <div class="stock-summary">
+            <div class="summary-card">
+              <div class="card-icon">📦</div>
+              <div class="card-content">
+                <div class="card-value" id="total-products">-</div>
+                <div class="card-label">전체 상품</div>
+              </div>
+            </div>
+            <div class="summary-card alert">
+              <div class="card-icon">🚨</div>
+              <div class="card-content">
+                <div class="card-value" id="out-of-stock">-</div>
+                <div class="card-label">재고 소진</div>
+              </div>
+            </div>
+            <div class="summary-card warning">
+              <div class="card-icon">⚠️</div>
+              <div class="card-content">
+                <div class="card-value" id="low-stock">-</div>
+                <div class="card-label">재고 부족</div>
+              </div>
+            </div>
+            <div class="summary-card success">
+              <div class="card-icon">✅</div>
+              <div class="card-content">
+                <div class="card-value" id="normal-stock">-</div>
+                <div class="card-label">정상 재고</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="last-sync">
+            <span>마지막 동기화: <span id="last-sync-time">-</span></span>
+            <button class="btn btn-sm" onclick="syncSmaregiNow()">지금 동기화</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 🆕 AI 발주 제안 섹션 (새로 추가) -->
+      <div class="dashboard-section">
+        <h3>🤖 AI 발주 제안</h3>
+        <div class="ai-suggestions" id="ai-suggestions">
+          <div class="suggestion-filters">
+            <button class="filter-btn active" data-filter="urgent">긴급</button>
+            <button class="filter-btn" data-filter="trending">인기상품</button>
+            <button class="filter-btn" data-filter="lowstock">재고부족</button>
+          </div>
+          <div id="suggestion-list" class="suggestion-list">
+            <!-- 동적으로 생성될 제안 목록 -->
+          </div>
+          <div class="suggestion-actions">
+            <button class="btn btn-primary" onclick="createOrderFromSuggestions()">
+              선택한 상품으로 발주서 생성
+            </button>
+          </div>
+        </div>
+      </div>
+      
       <!-- Quick Actions -->
       <div class="quick-actions">
         <!-- 새 발주서 생성 버튼 추가 -->
@@ -445,6 +531,16 @@
           <span class="action-icon">📥</span>
           <span>CSV 내보내기</span>
         </button>
+
+        <button class="quick-action-btn primary" onclick="showAutoSuggestions()">
+          <span class="action-icon">🤖</span>
+          <span>AI 발주 제안</span>
+        </button>
+        
+        <button class="quick-action-btn" onclick="showSalesAnalysis()">
+          <span class="action-icon">📈</span>
+          <span>판매 분석</span>
+        </button>
         
         <!-- 기존 버튼들 -->
         <button class="quick-action-btn" onclick="quickAction('bestProducts')">
@@ -463,6 +559,17 @@
       
       <!-- 핵심 지표 -->
       <div class="metrics-grid">
+        <div class="metric-card">
+          <h4>오늘 판매액</h4>
+          <div class="metric-value" id="today-sales">₩0</div>
+          <div class="metric-change" id="sales-change">-</div>
+        </div>
+        
+        <div class="metric-card">
+          <h4>재고 회전율</h4>
+          <div class="metric-value" id="turnover-rate">-</div>
+          <div class="metric-change">목표: 12회/년</div>
+        </div>
         <div class="metric-card">
           <h4>이번 달 발주액</h4>
           <div class="metric-value" id="monthly-total">₩0</div>
@@ -490,6 +597,15 @@
       </div>
       
       <div class="dashboard-grid">
+        <div class="dashboard-card full-width">
+          <h3>📊 판매 & 재고 현황</h3>
+          <div class="chart-tabs">
+            <button class="chart-tab active" data-chart="sales-stock">판매vs재고</button>
+            <button class="chart-tab" data-chart="turnover">회전율</button>
+            <button class="chart-tab" data-chart="forecast">수요예측</button>
+          </div>
+          <div id="integrated-chart" class="chart-container"></div>
+        </div>
         <!-- 발주 베스트 TOP 10 -->
         <div class="dashboard-card">
           <h3>발주 베스트 TOP 10</h3>
