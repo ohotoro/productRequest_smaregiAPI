@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>OHOTORO 발주관리</title>
+    <?!= include('styles'); ?>
+</head>
+<body>
+  <div class="container">
+    <!-- 헤더 -->
+<header class="header">
+  <h1 class="logo" data-i18n="header.title">OHOTORO 발주관리</h1>
+  <nav class="nav">
+    <button class="nav-btn active" data-tab="order" data-i18n="header.orderTab">발주서 작성</button>
+    <button class="nav-btn" data-tab="dashboard" data-i18n="header.dashboardTab">대시보드</button>
+    <button class="nav-btn" data-tab="frequent" data-i18n="header.frequentTab">자주 발주</button>
+    <button class="nav-btn" data-tab="safety-stock" data-i18n="header.safetyStockTab">안전재고</button>
+    <button class="nav-btn" data-tab="shipping">출고</button>
+    <button class="nav-btn" data-tab="settings" data-i18n="header.settingsTab">설정</button>
+  </nav>
+</header>
+    <!-- 발주서 작성 탭 -->
+<div id="order-tab" class="tab-content active">
+
+  <!-- 발주서 생성/선택 영역 추가 -->
+  <div class="order-management-section">
+    <div class="order-status-bar">
+      <div id="current-order-info" class="current-order-info">
+        <span class="no-order-message">발주서를 생성하거나 선택해주세요.</span>
+      </div>
+      <div class="order-actions">
+        <button id="create-order-btn" class="btn btn-primary">새 발주서 생성</button>
+        <button id="open-order-btn" class="btn btn-secondary">기존 발주서 열기</button>
+        <button id="upload-smaregi-btn" class="btn btn-secondary" onclick="showSmaregiUploadModal()">
+          <span style="margin-right: 4px;">🏪</span> Smaregi CSV
+        </button>
+        <button class="btn btn-secondary" onclick="showBulkStockEditModal()" id="bulk-stock-edit-btn" style="display:none;">
+          <span style="margin-right: 4px;">📦</span> 재고 상태 변경
+        </button>
+        <span class="divider">|</span>
+        <button id="upload-stock-btn" class="btn btn-secondary" onclick="showStockUploadModal()">
+          <span style="margin-right: 4px;">📊</span> 재고 업로드
+        </button>
+        <button id="merge-items-btn" class="btn btn-secondary" onclick="mergeDuplicateItems()">
+          <span style="margin-right: 4px;">🔀</span> 동일상품 합치기
+        </button>
+      </div>
+    </div>
+  </div>
+
+<!-- Smaregi CSV 업로드 모달 -->
+<div id="smaregi-upload-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeModal('smaregi-upload-modal')">&times;</span>
+    <h3>Smaregi CSV 업로드</h3>
+    
+    <div class="smaregi-info">
+      <div class="info-card">
+        <h4>📊 Smaregi CSV란?</h4>
+        <p>매장의 현재 재고 데이터를 업로드하여 발주 시 참고할 수 있습니다.</p>
+      </div>
+      <div class="upload-status">
+        <p><strong>마지막 업데이트:</strong> <span id="last-smaregi-upload">없음</span></p>
+        <p><strong>데이터 유효기간:</strong> 업로드 후 24시간</p>
+      </div>
+    </div>
+    
+    <div class="upload-area" id="smaregi-drop-zone">
+      <div class="upload-icon">📁</div>
+      <p>Smaregi CSV 파일을 드래그하거나 클릭하여 선택</p>
+      <input type="file" id="smaregi-file-input" accept=".csv" style="display: none;">
+    </div>
+    
+    <div class="csv-format-guide">
+      <h5>CSV 형식</h5>
+      <code>바코드,현재재고수량</code>
+      <small>예: 4901234567890,15</small>
+    </div>
+    
+    <div class="upload-preview" id="smaregi-preview" style="display: none;">
+      <h4>미리보기</h4>
+      <div id="smaregi-preview-content"></div>
+    </div>
+    
+    <div class="modal-actions">
+      <button id="process-smaregi-btn" class="btn btn-primary" disabled onclick="processSmaregiUpload()">
+        매장 재고 업데이트
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal('smaregi-upload-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+  <!-- 재고 업로드 모달 -->
+<div id="stock-upload-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeModal('stock-upload-modal')">&times;</span>
+    <h3>재고 CSV 업로드</h3>
+    
+    <div class="upload-area" id="csv-drop-zone">
+      <div class="upload-icon">📁</div>
+      <p>CSV 파일을 드래그하거나 클릭하여 선택</p>
+      <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
+    </div>
+    
+    <div class="update-type-options">
+      <h4>재고 업데이트 대상</h4>
+      <label class="radio-option">
+        <input type="radio" name="updateType" value="confirmed" checked>
+        <span>확정 상품만</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="updateType" value="unconfirmed">
+        <span>미확정 상품만</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="updateType" value="all">
+        <span>전체 상품</span>
+      </label>
+    </div>
+    
+    <div class="modal-actions">
+      <button id="process-csv-btn" class="btn btn-primary" disabled onclick="processCSVUpload()">
+        재고 업데이트
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal('stock-upload-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 재고 상태 편집 모달 -->
+<div id="stock-status-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeModal('stock-status-modal')">&times;</span>
+    <h3>재고 상태 수정</h3>
+    
+    <div class="product-info">
+      <div id="stock-modal-product-info"></div>
+    </div>
+    
+    <div class="stock-status-options">
+      <label class="radio-option">
+        <input type="radio" name="stockStatus" value="available">
+        <span>가능</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="stockStatus" value="soldout">
+        <span>품절</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="stockStatus" value="ordering">
+        <span>오더중</span>
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="stockStatus" value="custom">
+        <span>직접입력</span>
+        <input type="text" 
+               id="custom-status" 
+               class="form-input" 
+               placeholder="상태 입력 (예: 5개만 가능)"
+               disabled>
+      </label>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveStockStatus()">저장</button>
+      <button class="btn btn-secondary" onclick="closeModal('stock-status-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 일괄 재고 상태 편집 모달 -->
+<div id="bulk-stock-edit-modal" class="modal">
+  <div class="modal-content" style="max-width: 750px;">
+    <span class="modal-close" onclick="closeModal('bulk-stock-edit-modal')">&times;</span>
+    <h3>선택 항목 재고 상태 변경</h3>
+    
+    <div class="selected-items-info">
+      <p><span id="selected-count">0</span>개 항목이 선택되었습니다.</p>
+    </div>
+    
+    <div class="bulk-stock-options">
+      <div class="stock-option-card" onclick="applyBulkStock('가능')">
+        <span class="option-icon">✅</span>
+        <span class="option-text">가능</span>
+      </div>
+      <div class="stock-option-card" onclick="applyBulkStock('품절')">
+        <span class="option-icon">❌</span>
+        <span class="option-text">품절</span>
+      </div>
+      <div class="stock-option-card" onclick="applyBulkStock('오더중')">
+        <span class="option-icon">⏳</span>
+        <span class="option-text">오더중</span>
+      </div>
+      <div class="stock-option-card" onclick="applyBulkStock('quantity')">
+        <span class="option-icon">📊</span>
+        <span class="option-text">수량 지정</span>
+        <small>개별 입력</small>
+      </div>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('bulk-stock-edit-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+  <!-- 일괄 수량 지정 모달 -->
+  <div id="bulk-quantity-modal" class="modal">
+    <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <span class="modal-close" onclick="closeModal('bulk-quantity-modal')">&times;</span>
+      <h3>상품별 가능 수량 입력</h3>
+      
+      <div class="bulk-quantity-list" id="bulk-quantity-list">
+        <!-- 동적으로 생성됨 -->
+      </div>
+      
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveBulkQuantities()">저장</button>
+      <button class="btn btn-secondary" onclick="closeBulkQuantityModal()">취소</button>
+    </div>
+    </div>
+  </div>
+
+  <!-- 검색 영역 (발주서 생성 후 활성화) -->
+<div id="search-section" class="search-section disabled">
+  <div class="search-box-wrapper">
+    <div class="search-box">
+      <input type="text" 
+             id="search-input" 
+             class="search-input" 
+             placeholder="상품명 또는 바코드로 검색..."
+             disabled>
+      <button id="search-btn" class="search-btn" disabled>검색</button>
+    </div>
+    <!-- 검색 박스 오른쪽에 작은 아이콘 버튼 -->
+    <!--button class="issue-quick-btn" onclick="openProductIssueModal()" title="제품 이슈사항 관리 (Ctrl+I)">
+      <span class="icon">⚠️</span>
+      <span class="text">이슈</span>
+    </button-->
+  </div>
+  
+  <!-- 기존 태그 필터 -->
+  <div class="tag-filters">
+    <span class="tag-filter active" data-tag="all">전체</span>
+    <span class="tag-filter" data-tag="online-best">Online Best</span>
+    <span class="tag-filter" data-tag="showroom-best">Showroom Best</span>
+    <span class="tag-filter" data-tag="new">신상품</span>
+  </div>
+</div>
+
+  <!-- 검색 결과 -->
+  <div id="search-results" class="search-results"></div>
+
+  <!-- 발주 목록 -->
+  <div id="order-section" class="order-section disabled">
+    <div class="order-header">
+      <h2>발주 목록</h2>
+      <div class="order-actions">
+        <button class="btn btn-secondary issue-btn" onclick="openProductIssueModal()" title="제품 이슈사항">
+          <span style="margin-right: 4px;">⚠️</span> 이슈 관리
+        </button>
+        <span class="divider">|</span>
+        <button id="save-draft-btn" class="btn btn-secondary" disabled>임시 저장</button>
+        <button id="confirm-selected-btn" class="btn btn-primary" disabled>선택 확정</button>
+        <button id="confirm-all-btn" class="btn btn-primary" disabled>전체 확정</button>
+        <!-- CSV 내보내기 버튼 추가 -->
+        <button id="export-csv-btn" class="btn btn-success" onclick="showExportModal()" disabled>
+          <span style="margin-right: 4px;">📥</span> CSV 내보내기
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="showSortMenu()" style="padding: 8px 18px; font-size: 14px; font-weight: 500; border: none; border-radius: 4px; cursor: pointer; transition: all .2s; outline: none; ">
+          <i class="fas fa-sort"></i> 정렬
+        </button>
+        <button id="clear-btn" style="background: #d30000; color: #fff; " class="btn btn-secondary" disabled>초기화</button>
+
+      </div>
+    </div>
+    
+    <div id="order-list" class="order-list">
+      <div class="empty-state">
+        <p>발주서를 먼저 생성해주세요.</p>
+      </div>
+    </div>
+    
+    <!-- 발주 요약 -->
+    <div class="order-summary">
+      <div class="summary-item">
+        <span>총 상품수:</span>
+        <span id="total-items">0</span>
+      </div>
+      <div class="summary-item">
+        <span>총 수량:</span>
+        <span id="total-quantity">0</span>
+      </div>
+      <div class="summary-item">
+        <span>예상 금액:</span>
+        <span id="total-amount">₩0</span>
+      </div>
+      <div class="summary-item">
+        <span>미확정:</span>
+        <span id="pending-items">0</span>
+      </div>
+    </div>
+  </div>
+</div>
+      
+<!-- CSV 내보내기 모달 추가 -->
+<div id="export-csv-modal" class="modal">
+  <div class="modal-content" style="max-width: 90vw;">
+    <span class="modal-close" onclick="closeModal('export-csv-modal')">&times;</span>
+    <h3>CSV 내보내기</h3>
+    
+    <!-- 내보내기 옵션 -->
+    <div class="export-options">
+      <label class="radio-label">
+        <input type="radio" name="exportType" value="all" checked onchange="updateExportPreview()">
+        전체 내보내기
+      </label>
+      <label class="radio-label">
+        <input type="radio" name="exportType" value="selected" onchange="updateExportPreview()">
+        선택 항목만 내보내기
+      </label>
+      
+      <!-- 새로 추가 -->
+      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="exclude-exported" checked onchange="updateExportPreview()">
+          이미 내보낸 항목 제외
+        </label>
+      </div>
+    </div>
+    
+    <!-- 내보내기 검증 결과 -->
+    <div id="export-validation" class="export-validation">
+      <!-- 동적으로 생성됨 -->
+    </div>
+    
+    <!-- 내보내기 미리보기 -->
+    <div class="export-preview">
+      <h4>내보내기 미리보기</h4>
+      <div id="export-preview-content" class="preview-content">
+        <div class="loading-spinner-small"></div>
+        <p>검증 중...</p>
+      </div>
+    </div>
+    
+    <!-- 내보내기 이력 -->
+    <div class="export-history">
+      <h4>최근 내보내기 이력</h4>
+      <div id="export-history-content" class="history-content">
+        <!-- 동적으로 생성됨 -->
+      </div>
+    </div>
+    
+    <div class="modal-actions">
+      <button id="proceed-export-btn" class="btn btn-primary" onclick="proceedExport()" disabled>
+        내보내기 진행
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal('export-csv-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 내보내기 결과 모달 -->
+<div id="export-result-modal" class="modal">
+  <div class="modal-content" style="max-width: 500px;">
+    <span class="modal-close" onclick="closeModal('export-result-modal')">&times;</span>
+    <h3>내보내기 완료</h3>
+    
+    <div id="export-result-content">
+      <!-- 동적으로 생성됨 -->
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal('export-result-modal')">확인</button>
+    </div>
+  </div>
+</div>
+
+<!-- 발주서 생성 모달 -->
+<div id="create-order-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close">&times;</span>
+    <h3>새 발주서 생성</h3>
+    <div class="form-group">
+      <label>발주처 선택</label>
+      <select id="recipient-select" class="form-input">
+        <option value="">발주처를 선택하세요</option>
+      </select>
+      <small style="color: #666; display: block; margin-top: 5px;">
+        * 발주처 목록은 상품목록 시트의 '발주처' 탭에서 관리됩니다.
+      </small>
+    </div>
+    <div class="form-group">
+      <label>또는 새 발주처 입력</label>
+      <input type="text" id="new-recipient-input" class="form-input" placeholder="새 발주처명">
+      <small style="color: #666; display: block; margin-top: 5px;">
+        * 새 발주처는 자동으로 발주처 목록에 추가됩니다.
+      </small>
+    </div>
+    <div class="modal-actions">
+      <button id="create-order-confirm" class="btn btn-primary">발주서 생성</button>
+      <button class="btn btn-secondary" onclick="closeModal('create-order-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 발주서 열기 모달 -->
+<div id="open-order-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close">&times;</span>
+    <h3>기존 발주서 열기</h3>
+    <div id="recent-orders-list" class="recent-orders-list">
+      <div class="loading-spinner"></div>
+    </div>
+  </div>
+</div>
+
+    <!-- 대시보드 탭 -->
+    <div id="dashboard-tab" class="tab-content">
+      <!-- 긴급 액션 아이템 -->
+      <div id="action-items" class="action-items-container"></div>
+      
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <!-- 새 발주서 생성 버튼 추가 -->
+        <button class="quick-action-btn primary" onclick="showCreateOrderModal()">
+          <span class="action-icon">➕</span>
+          <span>새 발주서 생성</span>
+        </button>
+        
+        <!-- 마감 버튼 (이미 있음) -->
+        <button id="closeOrderBtn" onclick="closeCurrentOrder()" class="quick-action-btn">
+          <span class="action-icon">🔒</span>
+          <span>마감</span>
+        </button>
+        
+        <!-- CSV 내보내기 버튼 추가 -->
+        <button class="quick-action-btn" onclick="showExportModal()">
+          <span class="action-icon">📥</span>
+          <span>CSV 내보내기</span>
+        </button>
+        
+        <!-- 기존 버튼들 -->
+        <button class="quick-action-btn" onclick="quickAction('bestProducts')">
+          <span class="action-icon">⚡</span>
+          <span>베스트 상품 빠른 발주</span>
+        </button>
+        <button class="quick-action-btn" onclick="quickAction('monthlyReport')">
+          <span class="action-icon">📊</span>
+          <span>월간 리포트</span>
+        </button>
+        <button class="quick-action-btn" onclick="quickAction('budgetAlert')">
+          <span class="action-icon">💰</span>
+          <span>예산 알림 설정</span>
+        </button>
+      </div>
+      
+      <!-- 핵심 지표 -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <h4>이번 달 발주액</h4>
+          <div class="metric-value" id="monthly-total">₩0</div>
+          <div class="metric-change" id="monthly-change">-</div>
+        </div>
+        <div class="metric-card">
+          <h4>평균 발주 주기</h4>
+          <div class="metric-value" id="avg-cycle">-</div>
+          <div class="metric-change">최적: 7일</div>
+        </div>
+        <div class="metric-card">
+          <h4>반복 발주율</h4>
+          <div class="metric-value" id="repeat-rate">-</div>
+          <div class="metric-change">목표: 80%</div>
+        </div>
+        <div class="metric-card">
+          <h4>예산 사용률</h4>
+          <div class="metric-value" id="budget-rate">0%</div>
+          <div class="metric-progress">
+            <div class="mini-progress-bar">
+              <div id="budget-mini-fill" class="mini-progress-fill"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dashboard-grid">
+        <!-- 발주 베스트 TOP 10 -->
+        <div class="dashboard-card">
+          <h3>발주 베스트 TOP 10</h3>
+          <div id="top-products" class="chart-container"></div>
+        </div>
+        
+        <!-- 카테고리별 발주 현황 -->
+        <div class="dashboard-card">
+          <h3>카테고리별 발주 현황</h3>
+          <div id="category-chart" class="chart-container"></div>
+        </div>
+
+        <!-- 급상승/급하락 상품 -->
+        <div class="dashboard-card">
+          <h3>급상승/급하락 상품</h3>
+          <div class="trend-container">
+            <div class="trend-section">
+              <h4 class="trend-title up">🔥 급상승</h4>
+              <div id="trending-up" class="trend-list"></div>
+            </div>
+            <div class="trend-divider"></div>
+            <div class="trend-section">
+              <h4 class="trend-title down">📉 급하락</h4>
+              <div id="trending-down" class="trend-list"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 월별 발주 금액 추이 -->
+        <div class="dashboard-card full-width">
+          <h3>월별 발주 금액 추이</h3>
+          <div id="monthly-trend" class="chart-container"></div>
+        </div>
+        
+        <!-- 공급사별 발주 현황 -->
+        <div class="dashboard-card">
+          <h3>공급사별 발주 현황 TOP 10</h3>
+          <div id="supplier-chart" class="chart-container"></div>
+        </div>
+        
+        <!-- 발주 빈도 분석 -->
+        <div class="dashboard-card">
+          <h3>요일별 발주 패턴</h3>
+          <div id="weekday-pattern" class="chart-container"></div>
+        </div>
+        
+        <!-- 예산 사용 현황 -->
+        <div class="dashboard-card">
+          <h3>월 예산 사용 현황</h3>
+          <div class="budget-detail">
+            <div class="budget-progress">
+              <div class="progress-bar">
+                <div id="budget-used" class="progress-fill"></div>
+              </div>
+              <div class="budget-info">
+                <span id="budget-text">₩0 / ₩0</span>
+                <span id="budget-percent">0%</span>
+              </div>
+            </div>
+            <div class="budget-forecast">
+              <p id="budget-forecast-text">-</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 자주 발주 탭 -->
+<div id="frequent-tab" class="tab-content">
+  <div class="frequent-header">
+    <h2>자주 발주하는 상품</h2>
+    <div class="frequent-summary">
+      <span class="summary-text">최근 3개월 발주 횟수 기준</span>
+      <button class="btn btn-secondary btn-sm" onclick="refreshFrequentItems()">
+        <span style="margin-right: 4px;">🔄</span> 새로고침
+      </button>
+    </div>
+  </div>
+  
+  <!-- 간단한 통계 -->
+  <div class="frequent-quick-stats">
+    <div class="quick-stat">
+      <span class="stat-number" id="total-frequent">0</span>
+      <span class="stat-label">전체</span>
+    </div>
+    <div class="quick-stat">
+      <span class="stat-number" id="need-order">0</span>
+      <span class="stat-label">발주 필요</span>
+    </div>
+    <div class="quick-stat">
+      <span class="stat-number" id="this-month">0</span>
+      <span class="stat-label">이번달 발주</span>
+    </div>
+  </div>
+  
+  <!-- 심플한 리스트 -->
+  <div id="frequent-list" class="frequent-simple-list">
+    <!-- 자주 발주 상품 목록 -->
+  </div>
+</div>
+
+<!-- 안전재고 탭 컨텐츠 (개선된 버전) -->
+<div id="safety-stock-tab" class="tab-content">
+  <div class="safety-stock-header">
+    <div>
+      <h2>안전재고 관리</h2>
+      <p style="margin-top: 8px; color: #666; font-size: 14px;">
+        재고 부족을 예방하기 위한 최소 보유 수량을 설정합니다
+      </p>
+    </div>
+    <button class="btn btn-primary" onclick="showAddSafetyStockModal()">
+      <span style="margin-right: 6px;">➕</span> 안전재고 추가
+    </button>
+  </div>
+  
+  <div class="safety-stock-search">
+    <input type="text" 
+           id="safety-stock-search" 
+           class="search-input" 
+           placeholder="바코드, 상품명, 옵션으로 검색..."
+           oninput="searchSafetyStockItems(this.value)">
+  </div>
+  
+  <div id="safety-stock-list" class="safety-stock-list">
+    <!-- 안전재고 목록이 여기에 표시됩니다 -->
+  </div>
+</div>
+
+<!-- 안전재고 추가/수정 모달 -->
+<div id="safety-stock-modal" class="modal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeModal('safety-stock-modal')">&times;</span>
+    <h3>안전재고 설정</h3>
+    
+    <div class="form-group">
+      <label>제품 검색</label>
+      <input type="text" 
+             id="safety-product-search" 
+             class="form-input" 
+             placeholder="바코드 또는 상품명 검색..."
+             oninput="searchProductsForSafety(this.value)">
+      <div id="safety-search-results" class="safety-search-results"></div>
+      <div id="selected-safety-product" class="selected-product-info" style="display:none;"></div>
+    </div>
+    
+    <div class="form-group">
+      <label>안전재고 타입</label>
+      <div class="radio-group">
+        <label class="radio-option">
+          <input type="radio" name="safetyType" value="quantity" checked onchange="toggleSafetyInput()">
+          <span>수량</span>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="safetyType" value="percentage" onchange="toggleSafetyInput()">
+          <span>퍼센트 (%)</span>
+        </label>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>안전재고 값</label>
+      <div class="input-with-unit">
+        <input type="number" 
+               id="safety-value" 
+               class="form-input" 
+               min="0" 
+               placeholder="값 입력">
+        <span id="safety-unit" class="input-unit">개</span>
+      </div>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveSafetyStock()">저장</button>
+      <button class="btn btn-secondary" onclick="closeModal('safety-stock-modal')">취소</button>
+    </div>
+  </div>
+</div>
+
+<div id="shipping-tab" class="tab-content">
+  <!-- JavaScript에서 동적으로 생성됨 -->
+</div>
+
+    <!-- 설정 탭 -->
+    <div id="settings-tab" class="tab-content">
+      <div class="settings-form">
+        <h2>시스템 설정 <a style="margin-left: 2%; text-decoration: none;" href="https://docs.google.com/spreadsheets/d/1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E/edit?gid=0#gid=0">⚙️</a><a style="margin-left: 2%; text-decoration: none;" href="https://drive.google.com/drive/folders/1j5NFDfvftczJ8-IO1IEkJR-HwSxcE9-q">📁</a></h2>
+        
+        <!-- 기존 설정들 -->
+        <div class="form-group">
+          <label>상품 데이터 시트 ID</label>
+          <input type="text" id="product-sheet-id" class="form-input">
+        </div>
+        
+        <div class="settings-section">
+          <h3>박스 바코드 관리</h3>
+          <p class="section-desc">출고 작업에 사용할 박스 바코드를 등록하세요.</p>
+          
+          <!-- 박스 바코드 추가 폼 -->
+          <div class="box-barcode-form">
+            <div class="form-row">
+              <input type="text" 
+                    id="new-box-barcode" 
+                    class="form-input" 
+                    placeholder="박스 바코드 스캔 또는 입력"
+                    autocomplete="off">
+              <input type="text" 
+                    id="new-box-name" 
+                    class="form-input" 
+                    placeholder="박스 이름 (예: 박스 A)">
+              <button class="btn btn-primary" onclick="addBoxBarcode()">
+                추가
+              </button>
+            </div>
+          </div>
+          
+          <!-- 등록된 박스 목록 -->
+          <div class="registered-boxes-list" id="registered-boxes-list">
+            <!-- JavaScript로 동적 생성 -->
+          </div>
+        </div>
+
+        <!-- 음성 설정 섹션 -->
+        <div class="settings-section" style="margin-top: 24px; ">
+          <h3>🔊 음성 안내 설정</h3>
+          <p class="settings-description">출고 작업 시 음성 안내의 볼륨, 속도, 높낮이를 조정할 수 있습니다.</p>
+          
+          <div class="voice-settings-grid">
+            <!-- 볼륨 설정 -->
+            <div class="voice-setting-item">
+              <label for="voice-volume">볼륨</label>
+              <div class="slider-container">
+                <input type="range" 
+                      id="voice-volume" 
+                      class="voice-slider" 
+                      min="0" 
+                      max="1" 
+                      step="0.1" 
+                      value="0.8"
+                      oninput="updateVoiceSliderValue('voice-volume', 'voice-volume-value')">
+                <span class="slider-value" id="voice-volume-value">80%</span>
+              </div>
+            </div>
+            
+            <!-- 속도 설정 -->
+            <div class="voice-setting-item">
+              <label for="voice-rate">속도</label>
+              <div class="slider-container">
+                <input type="range" 
+                      id="voice-rate" 
+                      class="voice-slider" 
+                      min="0.5" 
+                      max="2.0" 
+                      step="0.1" 
+                      value="1.2"
+                      oninput="updateVoiceSliderValue('voice-rate', 'voice-rate-value')">
+                <span class="slider-value" id="voice-rate-value">1.2x</span>
+              </div>
+            </div>
+            
+            <!-- 높낮이 설정 -->
+            <div class="voice-setting-item">
+              <label for="voice-pitch">높낮이</label>
+              <div class="slider-container">
+                <input type="range" 
+                      id="voice-pitch" 
+                      class="voice-slider" 
+                      min="0.5" 
+                      max="2.0" 
+                      step="0.1" 
+                      value="1.0"
+                      oninput="updateVoiceSliderValue('voice-pitch', 'voice-pitch-value')">
+                <span class="slider-value" id="voice-pitch-value">1.0</span>
+              </div>
+            </div>
+            
+            <!-- 언어 설정 -->
+            <div class="voice-setting-item">
+              <label for="voice-language">언어</label>
+              <select id="voice-language" class="form-input" onchange="updateVoiceLanguage()">
+                <option value="ko-KR">한국어</option>
+                <option value="ja-JP">일본어</option>
+                <option value="en-US">영어</option>
+              </select>
+            </div>
+          </div>
+          
+          <!-- 테스트 및 저장 버튼 -->
+          <div class="voice-settings-actions">
+            <button type="button" class="btn btn-secondary" onclick="testVoiceSettings()">
+              🔊 음성 테스트
+            </button>
+            <button type="button" class="btn btn-primary" onclick="saveVoiceSettings()">
+              💾 음성 설정 저장
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>발주서 저장 시트 ID</label>
+          <input type="text" id="order-sheet-id" class="form-input">
+        </div>
+        
+        <div class="form-group">
+          <label>검색 결과 최대 표시 개수</label>
+          <input type="number" id="max-results" class="form-input" min="10" max="500">
+        </div>
+        
+        <div class="form-group">
+          <label>월 예산 설정</label>
+          <input type="number" id="monthly-budget" class="form-input" placeholder="예: 10000000">
+        </div>
+        
+        <div class="form-group">
+          <label data-i18n="settings.language">언어 설정</label>
+          <select id="language" class="form-input" onchange="changeLanguage(this.value)">
+            <option value="ko">한국어</option>
+            <option value="ja">日本語</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>과거 발주 데이터 가져오기</label>
+          <div class="import-section">
+            <input type="text" id="import-sheet-url" class="form-input" 
+                  placeholder="과거 발주 스프레드시트 URL 입력">
+            <small>기존 발주 데이터가 있는 스프레드시트 URL을 입력하세요</small>
+            <button class="btn btn-secondary" onclick="importHistoricalData()" style="margin-top: 10px;">
+              <span style="margin-right: 4px;">📥</span> 데이터 가져오기
+            </button>
+          </div>
+        </div>
+                
+        <!-- 표시 옵션 섹션 추가 -->
+        <div class="display-settings">
+          <h3>표시 옵션</h3>
+
+          <div class="setting-group">
+            <h3>재고 부족 기준 설정</h3>
+            <div class="form-group">
+              <label>재고 부족 판단 기준</label>
+              <input type="number" id="low-stock-threshold" class="form-input" 
+                    placeholder="10" min="1" max="100">
+              <small>이 수량 미만일 때 재고 부족으로 표시됩니다.</small>
+            </div>
+            <div class="form-group">
+              <label for="max-low-stock-display">재고 부족 상품 최대 표시 개수</label>
+              <input type="number" id="max-low-stock-display" class="form-input" 
+                    placeholder="50" min="10" max="200">
+              <small class="form-hint">재고 부족 상품을 한 번에 표시할 최대 개수 (10-200)</small>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <div class="setting-item">
+              <div class="setting-label">
+                <span>컬러칩 표시</span>
+              </div>
+              <div class="toggle-switch active" id="toggle-color-chip" onclick="toggleSetting('colorChipEnabled')">
+              </div>
+            </div>
+            <div class="setting-description">색상 정보를 시각적인 컬러칩으로 표시합니다</div>
+          </div>
+          
+          <div class="setting-group">
+            <div class="setting-item">
+              <div class="setting-label">
+                <span>바코드 표시</span>
+              </div>
+              <div class="toggle-switch" id="toggle-barcode" onclick="toggleSetting('showBarcode')">
+              </div>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <div class="setting-item">
+              <div class="setting-label">
+                <span>공급사명 표시</span>
+              </div>
+              <div class="toggle-switch" id="toggle-supplier" onclick="toggleSetting('showSupplier')">
+              </div>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <div class="setting-item">
+              <div class="setting-label">
+                <span>컴팩트 모드</span>
+              </div>
+              <div class="toggle-switch" id="toggle-compact" onclick="toggleSetting('compactMode')">
+              </div>
+            </div>
+            <div class="setting-description">더 많은 항목을 한 화면에 표시합니다</div>
+          </div>
+        </div>
+        <button id="save-settings" class="btn btn-primary">설정 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Sticky Bar -->
+  <div id="order-sticky-footer" class="order-sticky-footer">
+    <div class="sticky-footer-content">
+      <div class="sticky-summary">
+        <span>발주: <strong id="sticky-total-items">0</strong>개</span>
+        <span>수량: <strong id="sticky-total-quantity">0</strong>개</span>
+        <span>금액: <strong id="sticky-total-amount">₩0</strong></span>
+      </div>
+      <div class="sticky-actions">
+        <button class="btn btn-secondary btn-sm" onclick="showSortMenu()">
+          <i class="fas fa-sort"></i> 정렬
+        </button>
+        <button class="btn btn-primary btn-sm" onclick="saveDraft()">
+          <i class="fas fa-save"></i> 저장
+        </button>
+        <button class="btn btn-success btn-sm" onclick="confirmAllItems()">
+          <i class="fas fa-check"></i> 전체확정
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 모달 -->
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- 로딩 -->
+  <div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+  </div>
+
+  <?!= include('scripts'); ?>
+
+
+
+</body>
+</html>
