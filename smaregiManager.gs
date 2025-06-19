@@ -461,3 +461,18 @@ function getSmaregiData() {
     };
   }
 }
+
+function testPlatformConnection() {
+  try {
+    const stores = getPlatformStores();
+    return {
+      success: stores.length > 0,
+      stores: stores.length
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.toString()
+    };
+  }
+}
