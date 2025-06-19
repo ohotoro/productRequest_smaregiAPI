@@ -1,13 +1,5 @@
 // ===== 전역 설정 Code.gs ===== 
 
-const CONFIG = {
-  PRODUCT_SHEET_ID: '1k0SfvjUEvJgXgyAEufQin7EBTnqgghkCeuQdOCkcMoQ',
-  PRODUCT_SHEET_NAME: '상품목록',
-  CATEGORY_SHEET_NAME: 'category',
-  MAX_SEARCH_RESULTS: 100,
-  CACHE_DURATION: 3600, // 1시간
-  FREQUENT_ITEMS_COUNT: 1000
-};
 
 // ===== 웹앱 진입점 =====
 function doGet() {
