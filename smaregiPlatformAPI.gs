@@ -1,7 +1,6 @@
 // ===== smaregiPlatformAPI.gs - Smaregi プラットフォームAPI実装 =====
 
 // PLATFORM_CONFIG は config.gs で定義されているため、ここでは参照のみ
-// 現在の環境に応じた設定を取得
 function getCurrentConfig() {
   if (!CONFIG.PLATFORM_CONFIG) {
     throw new Error('PLATFORM_CONFIG が設定されていません');
@@ -11,34 +10,15 @@ function getCurrentConfig() {
   const isProduction = config.USE_PRODUCTION;
   
   return {
-    CONTRACT_ID: config.CONTRACT_ID,
+    CONTRACT_ID: isProduction ? config.PROD_CONTRACT_ID : config.DEV_CONTRACT_ID,  // ← ここを修正!
     CLIENT_ID: isProduction ? config.PROD_CLIENT_ID : config.DEV_CLIENT_ID,
     CLIENT_SECRET: isProduction ? config.PROD_CLIENT_SECRET : config.DEV_CLIENT_SECRET,
-    TOKEN_URL: config.TOKEN_URL,
+    TOKEN_URL: isProduction ? config.PROD_TOKEN_URL : config.DEV_TOKEN_URL,
     API_BASE_URL: isProduction ? config.PROD_API_BASE_URL : config.DEV_API_BASE_URL,
     SCOPES: config.SCOPES,
     ENVIRONMENT: isProduction ? '本番環境' : '開発環境'
   };
 }
-
-
-/**
- * プラットフォームAPI設定
- * デベロッパーズアカウントで作成したアプリ情報を設定
- */
-const PLATFORM_CONFIG = {
-  CONTRACT_ID: 'skuv592u8',  // 契約ID
-  CLIENT_ID: '',              // アプリのクライアントID（要設定）
-  CLIENT_SECRET: '',          // アプリのクライアントシークレット（要設定）
-  
-  // エンドポイント
-  TOKEN_URL: 'https://id.smaregi.jp/app/',
-  API_BASE_URL: 'https://api.smaregi.jp/',  // 本番環境
-  DEV_API_BASE_URL: 'https://api.smaregi.dev/',  // 開発環境
-  
-  // スコープ（必要な権限）
-  SCOPES: 'pos.products:read pos.stocks:read pos.stores:read'
-};
 
 /**
  * アクセストークン取得（Client Credentials Grant）
@@ -66,19 +46,19 @@ function getPlatformAccessToken() {
     
     const url = `${config.TOKEN_URL}${config.CONTRACT_ID}/token`;
     
-    // Smaregi는 client_id를 body에도 포함해야 함
+    // Basic Authentication 생성
+    const credentials = Utilities.base64Encode(`${config.CLIENT_ID}:${config.CLIENT_SECRET}`);
+    
     const payload = {
       grant_type: 'client_credentials',
-      scope: config.SCOPES,
-      client_id: config.CLIENT_ID,      // 추가!
-      client_secret: config.CLIENT_SECRET // 추가!
+      scope: config.SCOPES
     };
     
     const options = {
       method: 'POST',
       headers: {
+        'Authorization': `Basic ${credentials}`,
         'Content-Type': 'application/x-www-form-urlencoded'
-        // Authorization 헤더 제거 - body에 포함시킴
       },
       payload: Object.keys(payload)
         .map(key => `${key}=${encodeURIComponent(payload[key])}`)
@@ -87,12 +67,16 @@ function getPlatformAccessToken() {
     };
     
     console.log('요청 URL:', url);
+    console.log('Authorization:', `Basic ${credentials.substring(0, 10)}...`);
     
     const response = UrlFetchApp.fetch(url, options);
     const statusCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    console.log('응답 상태:', statusCode);
     
     if (statusCode === 200) {
-      const tokenData = JSON.parse(response.getContentText());
+      const tokenData = JSON.parse(responseText);
       
       // 有効期限を計算（通常1時間）
       tokenData.expires_at = new Date().getTime() + (tokenData.expires_in * 1000) - 60000;
@@ -104,7 +88,7 @@ function getPlatformAccessToken() {
       return tokenData;
       
     } else {
-      console.error('トークン取得失敗:', response.getContentText());
+      console.error('トークン取得失敗:', responseText);
       return null;
     }
     
@@ -131,7 +115,8 @@ function callPlatformAPI(endpoint, method = 'GET', payload = null) {
       };
     }
     
-    const url = `${PLATFORM_CONFIG.API_BASE_URL}${PLATFORM_CONFIG.CONTRACT_ID}/${endpoint}`;
+    const config = getCurrentConfig();  // ← 이렇게 수정!
+    const url = `${config.API_BASE_URL}${config.CONTRACT_ID}/${endpoint}`;
     
     const options = {
       method: method,
@@ -268,74 +253,91 @@ function getPlatformStores() {
   }
 }
 
-/**
- * プラットフォームAPI接続テスト
- * @returns {Object} テスト結果
- */
-function testPlatformConnection() {
-  try {
-    console.log('=== プラットフォームAPI接続テスト ===');
-    
-    // 1. トークン取得テスト
-    const tokenData = getPlatformAccessToken();
-    if (!tokenData) {
-      return {
-        success: false,
-        message: 'トークン取得失敗。クライアントID/シークレットを確認してください。'
-      };
+// smaregiPlatformAPI.gs에 추가
+function debugProductionAuth() {
+  console.log('=== 본번환경 인증 디버그 ===');
+  
+  // 현재 설정 확인
+  const config = getCurrentConfig();
+  console.log('CONTRACT_ID:', config.CONTRACT_ID);
+  console.log('CLIENT_ID:', config.CLIENT_ID);
+  console.log('환경:', config.ENVIRONMENT);
+  
+  // 토큰 URL 확인
+  const tokenUrl = `${config.TOKEN_URL}${config.CONTRACT_ID}/token`;
+  console.log('\n토큰 URL:', tokenUrl);
+  
+  // 다양한 방법으로 인증 시도
+  const methods = [
+    {
+      name: '방법1: Basic Auth + 빈 스코프',
+      headers: {
+        'Authorization': `Basic ${Utilities.base64Encode(`${config.CLIENT_ID}:${config.CLIENT_SECRET}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      payload: 'grant_type=client_credentials'
+    },
+    {
+      name: '방법2: Body에 credentials',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      payload: `grant_type=client_credentials&client_id=${config.CLIENT_ID}&client_secret=${config.CLIENT_SECRET}`
     }
-    
-    console.log('トークン取得成功');
-    
-    // 2. 店舗一覧取得テスト
-    const stores = getPlatformStores();
-    console.log(`${stores.length}個の店舗を確認`);
-    
-    // 3. 在庫データ取得テスト（最初の10件）
-    if (stores.length > 0) {
-      const endpoint = `pos/stocks?storeId=${stores[0].storeId}&limit=10`;
-      const stockResult = callPlatformAPI(endpoint);
+  ];
+  
+  methods.forEach(method => {
+    console.log(`\n--- ${method.name} ---`);
+    try {
+      const response = UrlFetchApp.fetch(tokenUrl, {
+        method: 'POST',
+        headers: method.headers,
+        payload: method.payload,
+        muteHttpExceptions: true
+      });
       
-      if (stockResult.success) {
-        return {
-          success: true,
-          message: 'プラットフォームAPI接続成功',
-          stores: stores.length,
-          sampleStocks: stockResult.data.length
-        };
+      console.log('응답:', response.getResponseCode());
+      if (response.getResponseCode() === 200) {
+        console.log('✅ 성공!');
+        const token = JSON.parse(response.getContentText());
+        
+        // 즉시 API 테스트
+        testWithToken(token.access_token);
+      } else {
+        console.log('내용:', response.getContentText());
       }
+    } catch (e) {
+      console.error('오류:', e);
     }
-    
-    return {
-      success: true,
-      message: 'API接続成功（店舗データなし）',
-      stores: 0
-    };
-    
-  } catch (error) {
-    console.error('接続テスト失敗:', error);
-    return {
-      success: false,
-      error: error.toString()
-    };
-  }
+  });
 }
 
-/**
- * 既存システムとの互換性維持
- * getSmaregiStockData を プラットフォームAPI版に置き換え
- */
-function getSmaregiStockData(storeId = null) {
-  // CLIENT_IDが設定されていない場合は従来の処理
-  if (!PLATFORM_CONFIG.CLIENT_ID) {
-    console.log('プラットフォームAPI未設定。従来のAPI v2を使用。');
-    // 既存の処理にフォールバック
-    return {
-      success: false,
-      message: 'API設定が必要です'
-    };
-  }
+function testWithToken(accessToken) {
+  console.log('\n토큰으로 API 테스트...');
+  const config = getCurrentConfig();
   
-  // プラットフォームAPI版を使用
-  return getPlatformStockData(storeId);
+  // 다른 URL 패턴 시도
+  const urls = [
+    `https://api.smaregi.jp/${config.CONTRACT_ID}/pos/stores`,
+    `https://api.smaregi.jp/v1/${config.CONTRACT_ID}/pos/stores`,
+    `https://api.smaregi.jp/platform/${config.CONTRACT_ID}/pos/stores`
+  ];
+  
+  urls.forEach(url => {
+    try {
+      const response = UrlFetchApp.fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'X-Contract-Id': config.CONTRACT_ID  // 추가 헤더
+        },
+        muteHttpExceptions: true
+      });
+      
+      console.log(`\n${url}: ${response.getResponseCode()}`);
+    } catch (e) {
+      console.error('오류:', e);
+    }
+  });
 }
