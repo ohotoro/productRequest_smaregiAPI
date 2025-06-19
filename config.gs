@@ -4,7 +4,7 @@
 const CONFIG = {
   // 스프레드시트 ID
   PRODUCT_SHEET_ID: '1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E',
-  ORDER_SHEET_ID: '1fYBl88flaa-xOt0TT_0fNBQNqVOvUu4WUlQIreW7mPM',
+  ORDER_SHEET_ID: '1eTIFbWZupx4BhX-PUmgXBNCx-l0BEsLG7GinlCGTNSA',
   
   // 시트 이름
   PRODUCT_SHEET_NAME: '상품목록',
