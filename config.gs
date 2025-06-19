@@ -28,29 +28,34 @@ const CONFIG = {
     TIMEOUT: 30000
   },
   
-  // Smaregi プラットフォームAPI 설정 (추가) ← 여기!
-  PLATFORM_CONFIG: {
-    CONTRACT_ID: 'skuv592u8',
-    
-    // 開発環境 (테스트용)
-    DEV_CLIENT_ID: '5436f7f654c4efa5d2a1f56355c5bca1',
-    DEV_CLIENT_SECRET: 'b55417971e428d55f64eb3bcbb8f9a9f3a4361cdc3ef2fb835051e3d3fb59e10',
-    
-    // 本番環境 (나중에 설정)
-    PROD_CLIENT_ID: 'add65344a30e3d0b0893fe972702a7b4',
-    PROD_CLIENT_SECRET: '',
-    
-    // 현재 사용할 환경 선택
-    USE_PRODUCTION: false,
-    
-    // API 엔드포인트
-    TOKEN_URL: 'https://id.smaregi.jp/app/',
-    DEV_API_BASE_URL: 'https://api.smaregi.dev/',
-    PROD_API_BASE_URL: 'https://api.smaregi.jp/',
-    
-    // 권한 스코프
-    SCOPES: 'pos.products:read pos.stocks:read pos.stores:read'
-  }
+// Smaregi プラットフォームAPI 설정
+PLATFORM_CONFIG: {
+  // 개발환경용 계약ID
+  DEV_CONTRACT_ID: 'sb_skx951h6',
+  
+  // 본번환경용 계약ID
+  PROD_CONTRACT_ID: 'skuv592u8',
+  
+  // 開発環境
+  DEV_CLIENT_ID: '5436f7f654c4efa5d2a1f56355c5bca1',
+  DEV_CLIENT_SECRET: '531546d78dc35216c63531cf66c85f04ecc472f31ef70d3ea85ce7ae3c1c0724',
+  
+  // 本番環境
+  PROD_CLIENT_ID: 'add65344a30e3d0b0893fe972702a7b4',
+  PROD_CLIENT_SECRET: 'e0ba58828a61ec832facf93bb8c6b40d80085c56f6c191b83a496c2cc97b61cd',  // ← 설정 완료!
+  
+  // 환경 선택 - 본번환경으로 변경!
+  USE_PRODUCTION: true,  // ← true로 변경!
+  
+  // API 엔드포인트
+  DEV_TOKEN_URL: 'https://id.smaregi.dev/app/',
+  PROD_TOKEN_URL: 'https://id.smaregi.jp/app/',
+  DEV_API_BASE_URL: 'https://api.smaregi.dev/',
+  PROD_API_BASE_URL: 'https://api.smaregi.jp/',
+  
+  // 권한 스코프
+  SCOPES: 'pos.stores:read pos.products:read pos.stock:read'
+}
 }; 
 
 // 발주서 열 인덱스 정의 (0부터 시작)
