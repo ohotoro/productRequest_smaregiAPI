@@ -462,16 +462,103 @@ function getSmaregiData() {
   }
 }
 
-function testPlatformConnection() {
+/**
+ * API 연결 상태 초기화 (웹앱에서 사용)
+ */
+function initializeAPIConnection() {
   try {
-    const stores = getPlatformStores();
-    return {
-      success: stores.length > 0,
-      stores: stores.length
-    };
-  } catch (error) {
+    // Platform API 우선 시도
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        console.log('Platform API 초기화 시도');
+        
+        // 토큰 발급 테스트
+        const tokenData = getPlatformAccessToken();
+        
+        if (tokenData) {
+          // 매장 조회로 연결 확인
+          const stores = getPlatformStores();
+          
+          if (stores && stores.length > 0) {
+            return {
+              success: true,
+              connected: true,
+              apiType: 'platform',
+              message: 'Platform API 연결 성공',
+              stores: stores.length
+            };
+          }
+        }
+      }
+    }
+    
+    // Legacy API 시도
+    const legacyResult = testSmaregiConnection();
+    if (legacyResult.success) {
+      return {
+        success: true,
+        connected: true,
+        apiType: 'legacy',
+        message: 'Legacy API 연결 성공',
+        stores: legacyResult.stores
+      };
+    }
+    
     return {
       success: false,
+      connected: false,
+      message: 'API 연결 실패',
+      error: 'API 설정을 확인해주세요'
+    };
+    
+  } catch (error) {
+    console.error('API 초기화 실패:', error);
+    return {
+      success: false,
+      connected: false,
+      message: '초기화 실패',
+      error: error.toString()
+    };
+  }
+}
+
+/**
+ * 수동 재고 동기화 (웹앱에서 호출)
+ */
+function syncSmaregiData() {
+  try {
+    console.log('=== 수동 재고 동기화 시작 ===');
+    
+    // 캐시 삭제
+    const cache = CacheService.getScriptCache();
+    cache.remove('platform_stock_data');
+    cache.remove('all_products_map');
+    
+    // 새로운 데이터 가져오기
+    const stockResult = getSmaregiStockData();
+    
+    if (stockResult.success) {
+      return {
+        success: true,
+        message: `${stockResult.count}개 상품의 재고 정보가 동기화되었습니다.`,
+        itemCount: stockResult.count,
+        timestamp: stockResult.timestamp
+      };
+    } else {
+      return {
+        success: false,
+        message: '동기화 실패: ' + (stockResult.message || stockResult.error),
+        error: stockResult.error
+      };
+    }
+    
+  } catch (error) {
+    console.error('동기화 실패:', error);
+    return {
+      success: false,
+      message: '동기화 중 오류가 발생했습니다.',
       error: error.toString()
     };
   }
