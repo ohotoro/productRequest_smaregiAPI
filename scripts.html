@@ -501,6 +501,7 @@ const smartRetry = new SmartRetry();
 
 // ===== 7. 초기화 =====
 document.addEventListener('DOMContentLoaded', async function() {
+  checkSmaregiConnection();
   console.log('=== 앱 초기화 시작 ===');
   const startTime = performance.now();
 
@@ -4043,24 +4044,6 @@ window.closeModal = function(modalId) {
     });
   }
 };
-
-// 페이지 로드 후 확인
-document.addEventListener('DOMContentLoaded', function() {
-  console.log('=== 우선순위 함수 등록 확인 ===');
-  console.log('showPriorityPicker:', typeof window.showPriorityPicker);
-  console.log('setPriority:', typeof window.setPriority);
-  console.log('getPriorityDisplay:', typeof window.getPriorityDisplay);
-  console.log('closeModal:', typeof window.closeModal);
-  
-  // 테스트 버튼 추가 (디버깅용)
-  setTimeout(() => {
-    if (typeof AppState !== 'undefined' && AppState.orderItems && AppState.orderItems.length > 0) {
-      console.log('테스트 가능 - 첫 번째 아이템 ID:', AppState.orderItems[0].id);
-      console.log('테스트하려면 콘솔에서: showPriorityPicker("' + AppState.orderItems[0].id + '")');
-    }
-  }, 2000);
-});
-
 
 function showCommentInput(id) {
   const item = AppState.orderItems.find(i => i.id == id);
@@ -9765,6 +9748,391 @@ function rollbackBoxCompletion() {
   
   displayShippingList();
 }
+
+
+
+
+
+
+
+
+
+// Smaregi 연결 상태 확인
+function checkSmaregiConnection() {
+  const statusEl = document.getElementById('smaregi-status');
+  const statusIcon = document.getElementById('smaregi-status-icon');
+  const statusText = document.getElementById('smaregi-status-text');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result.connected) {
+        statusEl.classList.add('connected');
+        statusEl.classList.remove('error');
+        statusIcon.textContent = '✅';
+        statusText.textContent = 'API 연결됨';
+        
+        // 재고 현황 업데이트
+        if (result.hasData) {
+          updateStockSummary(result);
+        }
+      } else {
+        statusEl.classList.add('error');
+        statusEl.classList.remove('connected');
+        statusIcon.textContent = '❌';
+        statusText.textContent = 'API 연결 안됨';
+      }
+    })
+    .withFailureHandler(function(error) {
+      statusEl.classList.add('error');
+      statusIcon.textContent = '❌';
+      statusText.textContent = '연결 오류';
+    })
+    .getSmaregiSummary();
+}
+
+// Smaregi 연결 새로고침
+function refreshSmaregiConnection() {
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showSaveIndicator('hide');
+      
+      if (result.success) {
+        showQuickSuccess('재고 데이터가 새로고침되었습니다.');
+        checkSmaregiConnection();
+        
+        // 현재 발주서가 있으면 재고 정보 업데이트
+        if (AppState.currentOrderInfo) {
+          updateOrderStockInfo();
+        }
+      } else {
+        showError('새로고침 실패: ' + result.message);
+      }
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('연결 실패: ' + error);
+    })
+    .syncSmaregiData();
+}
+
+// 자동 발주 제안 표시
+function showAutoSuggestions() {
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(suggestions) {
+      showSaveIndicator('hide');
+      displayAutoSuggestions(suggestions);
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('발주 제안 로드 실패');
+    })
+    .getQuickOrderSuggestions();
+}
+
+// 자동 제안 목록 표시
+function displayAutoSuggestions(suggestions) {
+  const modal = document.getElementById('auto-suggest-modal');
+  const list = document.getElementById('suggest-list');
+  
+  // 통계 업데이트
+  const stats = {
+    outOfStock: suggestions.filter(s => s.currentStock === 0).length,
+    lowStock: suggestions.filter(s => s.currentStock > 0 && s.currentStock < 10).length,
+    urgent: suggestions.filter(s => s.priority === 1).length
+  };
+  
+  document.getElementById('out-of-stock-count').textContent = stats.outOfStock;
+  document.getElementById('low-stock-count').textContent = stats.lowStock;
+  document.getElementById('urgent-count').textContent = stats.urgent;
+  
+  // 제안 목록 생성
+  list.innerHTML = suggestions.map((item, index) => {
+    const priorityClass = item.priority === 1 ? 'urgent' : item.priority === 2 ? 'warning' : '';
+    const stockClass = item.currentStock === 0 ? 'critical' : '';
+    
+    return `
+      <div class="suggest-item ${priorityClass}" data-index="${index}">
+        <input type="checkbox" class="suggest-checkbox" checked>
+        <div class="suggest-item-info">
+          <div class="suggest-product-name">
+            ${item.name}
+            ${item.isTrending ? '<span class="suggest-reason">인기</span>' : ''}
+            ${item.isFrequent ? '<span class="suggest-reason">자주발주</span>' : ''}
+          </div>
+          <div class="suggest-details">
+            ${item.barcode} | ${item.option || '옵션없음'} | ${item.supplierName || ''}
+          </div>
+        </div>
+        <div class="suggest-quantity">
+          <div class="suggest-stock ${stockClass}">
+            재고: ${item.currentStock}개
+          </div>
+          <input type="number" class="suggest-qty-input" value="${item.suggestedQuantity}" min="1">
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  // 제안 데이터 저장
+  window.currentSuggestions = suggestions;
+  
+  modal.style.display = 'block';
+}
+
+// 선택한 제안 추가
+function addSelectedSuggestions() {
+  const checkboxes = document.querySelectorAll('.suggest-checkbox:checked');
+  const itemsToAdd = [];
+  
+  checkboxes.forEach(checkbox => {
+    const item = checkbox.closest('.suggest-item');
+    const index = parseInt(item.dataset.index);
+    const quantity = parseInt(item.querySelector('.suggest-qty-input').value);
+    const suggestion = window.currentSuggestions[index];
+    
+    itemsToAdd.push({
+      barcode: suggestion.barcode,
+      name: suggestion.name,
+      option: suggestion.option,
+      quantity: quantity,
+      memo: suggestion.reason || '',
+      priority: suggestion.priority,
+      supplierName: suggestion.supplierName
+    });
+  });
+  
+  if (itemsToAdd.length === 0) {
+    showError('선택한 상품이 없습니다.');
+    return;
+  }
+  
+  // 발주서에 추가
+  itemsToAdd.forEach(item => {
+    addToOrderList(item);
+  });
+  
+  closeModal('auto-suggest-modal');
+  showQuickSuccess(`${itemsToAdd.length}개 상품이 발주서에 추가되었습니다.`);
+}
+
+// 전체 제안 추가
+function addAllSuggestions() {
+  const items = document.querySelectorAll('.suggest-item');
+  const itemsToAdd = [];
+  
+  items.forEach((item, index) => {
+    const quantity = parseInt(item.querySelector('.suggest-qty-input').value);
+    const suggestion = window.currentSuggestions[index];
+    
+    itemsToAdd.push({
+      barcode: suggestion.barcode,
+      name: suggestion.name,
+      option: suggestion.option,
+      quantity: quantity,
+      memo: suggestion.reason || '',
+      priority: suggestion.priority,
+      supplierName: suggestion.supplierName
+    });
+  });
+  
+  // 발주서에 추가
+  itemsToAdd.forEach(item => {
+    addToOrderList(item);
+  });
+  
+  closeModal('auto-suggest-modal');
+  showQuickSuccess(`${itemsToAdd.length}개 상품이 발주서에 추가되었습니다.`);
+}
+
+// 발주서 재고 정보 업데이트
+function updateOrderStockInfo() {
+  if (!AppState.currentOrderInfo || !AppState.currentOrderInfo.orderId) {
+    return;
+  }
+  
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showSaveIndicator('hide');
+      
+      if (result.success) {
+        showQuickSuccess(result.message);
+        
+        // UI 업데이트
+        result.updates.forEach(update => {
+          updateOrderItemStock(update);
+        });
+      }
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('재고 업데이트 실패');
+    })
+    .updateOrderWithSmaregiData(AppState.currentOrderInfo.orderId);
+}
+
+// 개별 아이템 재고 표시 업데이트
+function updateOrderItemStock(update) {
+  const items = document.querySelectorAll('.order-item');
+  
+  items.forEach(item => {
+    const barcode = item.querySelector('.item-barcode').textContent;
+    if (barcode === update.barcode) {
+      const stockBtn = item.querySelector('.stock-status-btn');
+      if (stockBtn) {
+        const statusClass = update.status === '가능' ? 'available' : 'unavailable';
+        const statusIcon = update.status === '가능' ? '✅' : '❌';
+        
+        stockBtn.className = `stock-status-btn ${statusClass}`;
+        stockBtn.innerHTML = `
+          <span>${statusIcon}</span>
+          <span>${update.status}</span>
+          <span class="stock-count">(${update.stock}개)</span>
+        `;
+      }
+    }
+  });
+}
+
+// 대시보드 재고 현황 업데이트
+function updateStockSummary(data) {
+  if (document.getElementById('total-products')) {
+    document.getElementById('total-products').textContent = data.totalItems || '-';
+    document.getElementById('out-of-stock').textContent = data.outOfStock || '0';
+    document.getElementById('low-stock').textContent = data.lowStock || '0';
+    document.getElementById('normal-stock').textContent = data.normalStock || '0';
+    document.getElementById('last-sync-time').textContent = 
+      data.lastSync ? new Date(data.lastSync).toLocaleString('ko-KR') : '없음';
+  }
+}
+
+// Smaregi 즉시 동기화
+function syncSmaregiNow() {
+  if (!confirm('지금 재고 데이터를 동기화하시겠습니까?')) {
+    return;
+  }
+  
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showSaveIndicator('hide');
+      
+      if (result.success) {
+        showQuickSuccess('동기화가 완료되었습니다.');
+        checkSmaregiConnection();
+        loadDashboard(); // 대시보드 새로고침
+      } else {
+        showError('동기화 실패');
+      }
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('동기화 오류: ' + error);
+    })
+    .syncSmaregiData();
+}
+
+// API 연결 테스트 (설정 페이지)
+function testSmaregiConnection() {
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showSaveIndicator('hide');
+      
+      const indicator = document.getElementById('api-status-indicator');
+      const message = document.getElementById('api-status-message');
+      
+      if (result.success) {
+        indicator.classList.add('connected');
+        indicator.classList.remove('error');
+        message.textContent = `연결 성공! ${result.stores}개 매장 확인됨`;
+        showQuickSuccess('Smaregi API 연결 테스트 성공');
+      } else {
+        indicator.classList.add('error');
+        indicator.classList.remove('connected');
+        message.textContent = '연결 실패: ' + result.message;
+        showError('연결 테스트 실패');
+      }
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('테스트 실패: ' + error);
+    })
+    .testSmaregiConnection();
+}
+
+// 자동 동기화 설정
+function setupAutoSync() {
+  const interval = document.getElementById('sync-interval').value;
+  
+  if (interval === '0') {
+    if (!confirm('자동 동기화를 비활성화하시겠습니까?')) {
+      return;
+    }
+  }
+  
+  showSaveIndicator('loading');
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showSaveIndicator('hide');
+      
+      if (result.success) {
+        showQuickSuccess(result.message);
+      } else {
+        showError('설정 실패');
+      }
+    })
+    .withFailureHandler(function(error) {
+      showSaveIndicator('hide');
+      showError('설정 오류: ' + error);
+    })
+    .setupSmaregiTriggers();
+}
+
+// 기존 CSV 업로드 함수들 제거/비활성화
+function showSmaregiUploadModal() {
+  showError('CSV 업로드는 더 이상 사용되지 않습니다. API 연동이 활성화되어 있습니다.');
+}
+
+// 재고 상태 스타일 추가
+const stockStatusStyles = `
+  .stock-count {
+    font-size: 11px;
+    margin-left: 4px;
+    opacity: 0.8;
+  }
+  
+  .stock-status-btn.available .stock-count {
+    color: #4caf50;
+  }
+  
+  .stock-status-btn.unavailable .stock-count {
+    color: #f44336;
+  }
+`;
+
+// 스타일 추가
+const styleSheet = document.createElement('style');
+styleSheet.textContent = stockStatusStyles;
+document.head.appendChild(styleSheet);
+
+
+
+
+
+
+
+
+
+
 
 // ===== 기존 switchTab 함수 수정 =====
 const originalSwitchTab = window.switchTab;
