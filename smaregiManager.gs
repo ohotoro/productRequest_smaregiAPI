@@ -231,48 +231,53 @@ function updateOrderWithSmaregiData(orderId) {
 }
 
 /**
- * 대시보드용 Smaregi 요약 정보
- * @returns {Object} 요약 정보
+ * ダッシュボード用 Smaregi 要約情報
+ * @returns {Object} 要約情報
  */
 function getSmaregiSummary() {
   try {
-    // 연결 상태 확인
-    if (!isSmaregiAvailable()) {
-      return {
-        connected: false,
-        message: 'Smaregi API 연결 안됨'
-      };
+    // プラットフォームAPI使用可能かチェック
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // プラットフォームAPIモード
+        const testResult = testPlatformConnection();
+        
+        return {
+          success: true,
+          connected: testResult.success,
+          hasData: testResult.success && testResult.stores > 0,
+          message: testResult.message,
+          apiVersion: 'Platform API v4',
+          environment: config.ENVIRONMENT,
+          stores: testResult.stores || 0,
+          totalItems: 0,
+          outOfStock: 0,
+          lowStock: 0,
+          normalStock: 0
+        };
+      }
     }
     
-    // 통계 정보 가져오기
-    const stats = getSmaregiDashboardStats();
-    if (!stats) {
-      return {
-        connected: true,
-        hasData: false
-      };
-    }
-    
-    // 마지막 동기화 시간
-    const scriptProps = PropertiesService.getScriptProperties();
-    const lastSync = scriptProps.getProperty('SMAREGI_LAST_SYNC');
-    
+    // API v2モード（データ取得不可）
     return {
-      connected: true,
-      hasData: true,
-      totalItems: stats.totalItems,
-      outOfStock: stats.outOfStock,
-      lowStock: stats.lowStock,
-      normalStock: stats.normalStock,
-      lastSync: lastSync ? new Date(lastSync).toLocaleString('ko-KR') : null,
-      suggestions: stats.suggestions,
-      alerts: generateStockAlerts(stats)
+      success: false,
+      connected: false,
+      hasData: false,
+      message: 'API設定が必要です',
+      apiVersion: 'None',
+      totalItems: 0,
+      outOfStock: 0,
+      lowStock: 0,
+      normalStock: 0
     };
     
   } catch (error) {
-    console.error('Smaregi 요약 생성 실패:', error);
+    console.error('Smaregi 要約情報取得失敗:', error);
     return {
+      success: false,
       connected: false,
+      message: '接続エラー: ' + error.toString(),
       error: error.toString()
     };
   }
