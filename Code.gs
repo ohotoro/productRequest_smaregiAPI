@@ -1183,6 +1183,9 @@ function getSettings() {
   // 음성 설정 추가
   const voiceSettings = getVoiceSettings();
   
+  // 박스 바코드는 스프레드시트에서 가져오기
+  const boxBarcodes = getBoxBarcodesFromSheet();
+  
   return {
     productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
     orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
@@ -1194,10 +1197,16 @@ function getSettings() {
     suggestStock20: settings.suggestStock20 || '10',
     boxMode: settings.boxMode || 'barcode',
     boxDigits: settings.boxDigits || '3',
-    boxBarcodes: getBoxBarcodesFromSheet(),
+    boxBarcodes: boxBarcodes, // 스프레드시트에서 가져온 데이터
     maxLowStockDisplay: settings.maxLowStockDisplay || '50',
     // 음성 설정 추가
-    voiceSettings: voiceSettings
+    voiceSettings: voiceSettings,
+    // 판매 기간 설정 추가
+    salesPeriodShort: settings.salesPeriodShort || '7',
+    salesPeriodLong: settings.salesPeriodLong || '30',
+    salesThresholdHot: settings.salesThresholdHot || '20',
+    salesThresholdPopular: settings.salesThresholdPopular || '10',
+    salesThresholdNormal: settings.salesThresholdNormal || '5'
   };
 }
 
@@ -1301,6 +1310,23 @@ function updateSettings(newSettings) {
       if (!voiceResult.success) {
         return voiceResult;
       }
+    }
+
+    // 판매 기간 설정 추가
+    if (newSettings.salesPeriodShort) {
+      userProperties.setProperty('salesPeriodShort', newSettings.salesPeriodShort);
+    }
+    if (newSettings.salesPeriodLong) {
+      userProperties.setProperty('salesPeriodLong', newSettings.salesPeriodLong);
+    }
+    if (newSettings.salesThresholdHot) {
+      userProperties.setProperty('salesThresholdHot', newSettings.salesThresholdHot);
+    }
+    if (newSettings.salesThresholdPopular) {
+      userProperties.setProperty('salesThresholdPopular', newSettings.salesThresholdPopular);
+    }
+    if (newSettings.salesThresholdNormal) {
+      userProperties.setProperty('salesThresholdNormal', newSettings.salesThresholdNormal);
     }
     
     return { success: true, message: '설정이 저장되었습니다.' };
@@ -3009,30 +3035,6 @@ function getVoiceSettings() {
   }
 }
 
-// 설정에 박스번호 관련 추가
-function getSettings() {
-  const userProperties = PropertiesService.getUserProperties();
-  const settings = userProperties.getProperties();
-  
-  // 박스 바코드는 스프레드시트에서 가져오기
-  const boxBarcodes = getBoxBarcodesFromSheet();
-  
-  return {
-    productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
-    orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
-    maxSearchResults: settings.maxSearchResults || CONFIG.MAX_SEARCH_RESULTS,
-    language: settings.language || 'ko',
-    monthlyBudget: settings.monthlyBudget || 10000000,
-    suggestStock0: settings.suggestStock0 || '30',
-    suggestStock10: settings.suggestStock10 || '20',
-    suggestStock20: settings.suggestStock20 || '10',
-    // 박스 설정
-    boxMode: settings.boxMode || 'barcode',
-    boxDigits: settings.boxDigits || '3',
-    boxBarcodes: boxBarcodes // 스프레드시트에서 가져온 데이터
-  };
-}
-
 // 출고 세션 저장/복원
 function saveShippingSession(sessionData) {
   try {
@@ -3576,4 +3578,154 @@ function resetAllBoxNumbers(orderId) {
       message: error.toString()
     };
   }
+}
+
+// ===== 개별 상품 판매 정보 조회 =====
+function getProductSalesData(barcode) {
+  try {
+    if (!isSmaregiAvailable()) {
+      return {
+        success: false,
+        salesInfo: null
+      };
+    }
+    
+    const salesInfo = getProductSalesInfo(barcode);
+    
+    return {
+      success: true,
+      barcode: barcode,
+      salesInfo: salesInfo
+    };
+    
+  } catch (error) {
+    console.error('판매 정보 조회 실패:', error);
+    return {
+      success: false,
+      salesInfo: null
+    };
+  }
+}
+
+// ===== Code.gs에 추가할 함수들 =====
+
+/**
+ * 여러 바코드로 상품 조회 (프리페치용)
+ */
+function getProductsByBarcodes(barcodes) {
+  if (!barcodes || barcodes.length === 0) return [];
+  
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상품 데이터베이스');
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const barcodeIndex = headers.indexOf('バーコード');
+    
+    if (barcodeIndex === -1) return [];
+    
+    const products = [];
+    const barcodeSet = new Set(barcodes);
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const barcode = String(row[barcodeIndex]);
+      
+      if (barcodeSet.has(barcode)) {
+        const product = {};
+        headers.forEach((header, index) => {
+          product[header] = row[index];
+        });
+        products.push(product);
+        
+        // 찾은 바코드는 제거 (중복 방지)
+        barcodeSet.delete(barcode);
+        
+        // 모두 찾았으면 종료
+        if (barcodeSet.size === 0) break;
+      }
+    }
+    
+    return products;
+    
+  } catch (error) {
+    console.error('상품 일괄 조회 실패:', error);
+    return [];
+  }
+}
+
+/**
+ * 초기 데이터 번들 (최적화)
+ */
+function getInitialDataBundle() {
+  const startTime = new Date().getTime();
+  
+  try {
+    // 캐시 확인
+    const cached = getCache('INITIAL_BUNDLE');
+    if (cached) {
+      console.log('번들 캐시 사용');
+      return cached;
+    }
+    
+    console.log('초기 데이터 번들 생성 시작');
+    
+    const bundle = {
+      timestamp: new Date().toISOString(),
+      settings: getSettings(),
+      translations: loadTranslations((getSettings().language || 'japanese')),
+      currentOrder: checkCurrentOrder(),
+      categoryRules: getCachedCategoryRules(),
+      smaregiData: null,
+      products: null
+    };
+    
+    // 상품 데이터 로드
+    const productsData = loadInitialProductsWithIssues();
+    bundle.products = {
+      data: productsData.products,
+      withIssues: productsData.withIssues,
+      totalCount: productsData.totalCount
+    };
+    
+    // Smaregi 데이터
+    const smaregiData = getSmaregiData();
+    if (smaregiData) {
+      bundle.smaregiData = {
+        data: smaregiData,
+        uploadTime: PropertiesService.getScriptProperties().getProperty('smaregiUploadTime')
+      };
+    }
+    
+    // 발주서가 있으면 발주 항목도 포함
+    if (bundle.currentOrder) {
+      bundle.orderItems = loadOrderItemsFromSheet(bundle.currentOrder.sheetName);
+    }
+    
+    // 캐시 저장 (10분)
+    setCache('INITIAL_BUNDLE', bundle, 600);
+    
+    const loadTime = new Date().getTime() - startTime;
+    console.log(`번들 생성 완료: ${loadTime}ms`);
+    
+    return bundle;
+    
+  } catch (error) {
+    console.error('번들 생성 실패:', error);
+    // 실패시 개별 로드로 폴백
+    return null;
+  }
+}
+
+/**
+ * 카테고리 규칙 캐시 버전
+ */
+function getCachedCategoryRules() {
+  const cached = getCache(CACHE_KEYS.CATEGORY_RULES);
+  if (cached) return cached;
+  
+  const rules = loadCategoryRules();
+  setCache(CACHE_KEYS.CATEGORY_RULES, rules, CACHE_DURATION.LONG);
+  return rules;
 }
