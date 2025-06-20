@@ -502,10 +502,9 @@ const smartRetry = new SmartRetry();
 
 // ===== 7. 초기화 =====
 document.addEventListener('DOMContentLoaded', async function() {
-  console.log('=== 앱 초기화 시작 ===');
+  console.log('=== 앱 초기화 시작 (최적화) ===');
   const startTime = performance.now();
 
-  // URL 파라미터로 강제 새로고침 확인
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('refresh') === 'shipping') {
     sessionStorage.setItem('forceRefreshShipping', 'true');
@@ -525,69 +524,63 @@ document.addEventListener('DOMContentLoaded', async function() {
     AppState.settings = settings;
     AppState.translations = translations;
     
-    // 음성 설정 로드 추가
     await loadVoiceSettings();
-    
-    // 이벤트 리스너 설정
     setupEventListeners();
     
-    // 발주서 정보 설정
     if (orderInfo) {
       AppState.currentOrderInfo = orderInfo;
       updateOrderStatus();
       enableOrderFeatures();
     }
     
-    // 2단계: 상품 데이터 로드
-    updateLoadingMessage('상품 데이터 로드 중...');
+    // 2단계: 데이터 로드와 API 연결을 병렬로 처리
+    updateLoadingMessage('데이터 로드 중...');
     
     const dataPromises = [
       loadInitialProductsWithIssuesAsync(),
-      loadSmaregiDataAsync(), // 이 함수가 먼저 실행되어야 함
-      loadCategoryRulesAsync().catch(() => ({}))
+      loadSmaregiDataAsync(),
+      loadCategoryRulesAsync().catch(() => ({})),
+      checkSmaregiConnectionAsync() // 병렬 처리
     ];
     
-    // 발주서가 있으면 발주 항목도 함께 로드
     if (orderInfo) {
-      updateLoadingMessage('발주 항목 로드 중...');
       dataPromises.push(
-        loadOrderItemsFromSheetAsync()
-          .then(items => {
-            console.log('발주 항목 로드 완료:', items ? items.length : 0);
-            // 발주 목록이 로드되면 즉시 UI 업데이트
+        loadOrderItemsFromSheetAsync().then(items => {
+          console.log('발주 항목 로드 완료:', items ? items.length : 0);
+          requestAnimationFrame(() => {
             updateOrderList();
             updateOrderSummary();
-            return items;
-          })
+          });
+          return items;
+        })
       );
     }
     
-    // 모든 데이터 로드 완료 대기
     const results = await Promise.all(dataPromises);
     
-    // 3단계: Smaregi 연결 상태 확인 (데이터 로드 후)
-    checkSmaregiConnection();
+    // UI 초기화
+    requestAnimationFrame(() => {
+      initializeDisplaySettings();
+      injectColorChipStyles();
+      setupStickyFooter();
+    });
     
-    // 4단계: UI 초기화
-    initializeDisplaySettings();
-    injectColorChipStyles();
     startAutoSave();
     
-    // 세션 복원
     if (AppState.currentOrderInfo && !restoreSession()) {
-      // 이미 updateOrderList()가 호출되었으므로 중복 호출 방지
       console.log('세션 복원 스킵');
     }
-
-    // Sticky Header 설정 (여기에 추가)
-    setupStickyFooter();
     
-    // 5단계: 모든 작업 완료 후 로딩 숨기기
     const loadTime = (performance.now() - startTime) / 1000;
     console.log(`전체 초기화 완료: ${loadTime.toFixed(1)}초`);
     
     hideLoading();
     showQuickSuccess(`초기화 완료 (${loadTime.toFixed(1)}초)`);
+    
+    // 백그라운드 작업
+    setTimeout(() => {
+      prefetchFrequentProducts();
+    }, 3000);
     
   } catch (error) {
     console.error('초기화 중 오류:', error);
@@ -595,6 +588,249 @@ document.addEventListener('DOMContentLoaded', async function() {
     showError('앱 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
   }
 });
+
+// Smaregi 연결 확인 비동기 버전
+function checkSmaregiConnectionAsync() {
+  return new Promise((resolve) => {
+    google.script.run
+      .withSuccessHandler(function(result) {
+        console.log('Smaregi 연결 상태:', result);
+        AppState.smaregiConnected = result.connected;
+        
+        if (result.connected && result.hasData) {
+          console.log(`Smaregi 연결 성공: ${result.itemCount}개 상품`);
+          showQuickSuccess(`Smaregi API 연결됨 (${result.itemCount}개 상품)`);
+        }
+        
+        updateSmaregiStatus();
+        resolve(result);
+      })
+      .withFailureHandler(function(error) {
+        console.error('Smaregi 연결 확인 실패:', error);
+        AppState.smaregiConnected = false;
+        updateSmaregiStatus();
+        resolve({ connected: false });
+      })
+      .checkSmaregiConnection();
+  });
+}
+
+// 검색 히스토리 추가
+function addSearchHistory(barcode) {
+  try {
+    let history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+    
+    // 중복 제거 후 최신 추가
+    history = history.filter(b => b !== barcode);
+    history.unshift(barcode);
+    
+    // 최대 100개 유지
+    if (history.length > 100) {
+      history = history.slice(0, 100);
+    }
+    
+    localStorage.setItem('searchHistory', JSON.stringify(history));
+    
+    // 10번째마다 자주 검색하는 상품 프리페치
+    if (history.length % 10 === 0) {
+      prefetchFrequentProducts();
+    }
+    
+  } catch (e) {
+    console.warn('검색 히스토리 저장 실패:', e);
+  }
+}
+
+// 자주 검색하는 상품 분석
+function getFrequentSearches() {
+  try {
+    const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+    const frequency = {};
+    
+    history.forEach(barcode => {
+      frequency[barcode] = (frequency[barcode] || 0) + 1;
+    });
+    
+    return Object.entries(frequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([barcode, count]) => ({ barcode, count }));
+      
+  } catch (e) {
+    return [];
+  }
+}
+
+// 자주 검색하는 상품 프리페치
+function prefetchFrequentProducts() {
+  const frequent = getFrequentSearches();
+  if (frequent.length === 0) return;
+  
+  // 상위 10개 상품만 프리페치
+  const toPrefetch = frequent
+    .slice(0, 10)
+    .map(f => f.barcode)
+    .filter(barcode => !cache.get('product', barcode));
+  
+  if (toPrefetch.length > 0) {
+    console.log(`프리페치: ${toPrefetch.length}개 상품`);
+    
+    // 백그라운드에서 로드
+    setTimeout(() => {
+      google.script.run
+        .withSuccessHandler((products) => {
+          if (products && Array.isArray(products)) {
+            products.forEach(product => {
+              cache.set('product', product.barcode, product);
+            });
+            console.log('프리페치 완료');
+          }
+        })
+        .withFailureHandler((error) => {
+          console.error('프리페치 실패:', error);
+        })
+        .getProductsByBarcodes(toPrefetch);
+    }, 500);
+  }
+}
+
+// 초기화시 자주 검색하는 상품 프리페치
+document.addEventListener('DOMContentLoaded', function() {
+  // 기존 초기화 코드 후에 추가
+  setTimeout(() => {
+    prefetchFrequentProducts();
+  }, 3000); // 3초 후 실행
+});
+
+// ===== 초기화 코드에 번들 사용 추가 =====
+
+async function loadInitialDataWithBundle() {
+  const localCache = new LocalCache();
+  
+  // 로컬 캐시 확인
+  const cachedBundle = localCache.get('initial_bundle');
+  if (cachedBundle && cachedBundle.timestamp) {
+    const age = Date.now() - new Date(cachedBundle.timestamp).getTime();
+    if (age < 5 * 60 * 1000) { // 5분 이내
+      console.log('로컬 캐시 번들 사용');
+      applyBundleData(cachedBundle);
+      
+      // 백그라운드에서 최신 데이터 확인
+      checkForBundleUpdates();
+      return true;
+    }
+  }
+  
+  // 서버에서 번들 로드
+  return new Promise((resolve) => {
+    google.script.run
+      .withSuccessHandler((bundle) => {
+        if (bundle) {
+          console.log('서버 번들 로드 성공');
+          localCache.set('initial_bundle', bundle);
+          applyBundleData(bundle);
+          resolve(true);
+        } else {
+          console.log('번들 로드 실패, 개별 로드로 폴백');
+          resolve(false);
+        }
+      })
+      .withFailureHandler((error) => {
+        console.error('번들 로드 에러:', error);
+        resolve(false);
+      })
+      .getInitialDataBundle();
+  });
+}
+
+// 번들 데이터 적용
+function applyBundleData(bundle) {
+  // 설정
+  if (bundle.settings) {
+    AppState.settings = bundle.settings;
+  }
+  
+  // 번역
+  if (bundle.translations) {
+    AppState.translations = bundle.translations;
+  }
+  
+  // 현재 발주서
+  if (bundle.currentOrder) {
+    AppState.currentOrderInfo = bundle.currentOrder;
+    updateOrderStatus();
+    enableOrderFeatures();
+  }
+  
+  // 상품 데이터
+  if (bundle.products) {
+    AppState.products = bundle.products.data || [];
+    AppState.productsWithIssues = bundle.products.withIssues || [];
+    AppState.totalProductCount = bundle.products.totalCount || 0;
+    AppState.productsLoaded = true;
+  }
+  
+  // Smaregi 데이터
+  if (bundle.smaregiData && bundle.smaregiData.data) {
+    AppState.smaregiData = bundle.smaregiData.data;
+    AppState.smaregiUploadTime = bundle.smaregiData.uploadTime;
+    AppState.smaregiDataLoaded = true;
+  }
+  
+  // 카테고리 규칙
+  if (bundle.categoryRules) {
+    AppState.categoryRules = bundle.categoryRules;
+  }
+  
+  // 발주 항목
+  if (bundle.orderItems) {
+    AppState.orderItems = bundle.orderItems;
+    updateOrderList();
+    updateOrderSummary();
+  }
+}
+
+// 백그라운드 업데이트 확인
+function checkForBundleUpdates() {
+  setTimeout(() => {
+    google.script.run
+      .withSuccessHandler((newBundle) => {
+        if (newBundle && isNewerBundle(newBundle)) {
+          console.log('새로운 번들 데이터 발견');
+          const localCache = new LocalCache();
+          localCache.set('initial_bundle', newBundle);
+          
+          // 중요한 변경사항만 적용
+          if (hasImportantChanges(newBundle)) {
+            showQuickInfo('데이터가 업데이트되었습니다.');
+          }
+        }
+      })
+      .getInitialDataBundle();
+  }, 5000);
+}
+
+// 번들이 더 새로운지 확인
+function isNewerBundle(newBundle) {
+  const currentTimestamp = AppState.bundleTimestamp || 0;
+  const newTimestamp = new Date(newBundle.timestamp).getTime();
+  return newTimestamp > currentTimestamp;
+}
+
+// 중요한 변경사항 확인
+function hasImportantChanges(newBundle) {
+  // 상품 수 변경
+  if (newBundle.products && newBundle.products.totalCount !== AppState.totalProductCount) {
+    return true;
+  }
+  
+  // Smaregi 데이터 업데이트
+  if (newBundle.smaregiData && newBundle.smaregiData.uploadTime !== AppState.smaregiUploadTime) {
+    return true;
+  }
+  
+  return false;
+}
 
 // 더 세밀한 버전 (필요시 사용)
 function setupStickyFooter() {
@@ -1994,6 +2230,15 @@ function searchAllProducts(query) {
         const sortedResults = sortSearchResults(allResults, query);
         
         displaySearchResults(sortedResults);
+
+        if (sortedResults && sortedResults.length > 0) {
+          // 검색 히스토리 추가
+          if (query.match(/^\d+$/)) {
+            addSearchHistory(query);
+          } else if (sortedResults[0] && sortedResults[0].barcode) {
+            addSearchHistory(sortedResults[0].barcode);
+          }
+        }
         
         if (newProducts.length > 0) {
           showQuickSuccess(`${newProducts.length}개의 추가 결과를 찾았습니다.`);
@@ -7164,7 +7409,6 @@ function updateSmaregiStatus() {
       statusText.textContent = 'API 확인 실패';
       AppState.smaregiConnected = false;
     })
-    .checkSmaregiConnection();
 }
 
 // scripts.html의 Smaregi 관련 최적화된 코드
