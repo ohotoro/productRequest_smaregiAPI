@@ -1,3 +1,4 @@
+
 // smaregiPlatformAPI.gs 수정 - 재고 데이터 가져오기 (await 제거 버전)
 function getPlatformStockData(storeId = null) {
   try {
