@@ -1,4 +1,3 @@
-
 <script>
 
 // ===== localStorage 안전 초기화 (가장 먼저 실행) =====
@@ -1536,40 +1535,16 @@ function updateOrderStatus() {
 }
 
 function enableOrderFeatures() {
-  // search-section과 order-section은 존재하므로 안전하게 처리
-  const searchSection = document.getElementById('search-section');
-  const orderSection = document.getElementById('order-section');
-  
-  if (searchSection) searchSection.classList.remove('disabled');
-  if (orderSection) orderSection.classList.remove('disabled');
-  
-  // 각 요소가 존재하는지 확인 후 처리
-  const searchInput = document.getElementById('search-input');
-  if (searchInput) searchInput.disabled = false;
-  
-  const searchBtn = document.getElementById('search-btn');
-  if (searchBtn) searchBtn.disabled = false;
-  
-  // 이 버튼들은 HTML에 없을 수 있으므로 존재 여부 확인
-  const saveDraftBtn = document.getElementById('save-draft-btn');
-  if (saveDraftBtn) saveDraftBtn.disabled = false;
-  
-  const confirmSelectedBtn = document.getElementById('confirm-selected-btn');
-  if (confirmSelectedBtn) confirmSelectedBtn.disabled = false;
-  
-  const confirmAllBtn = document.getElementById('confirm-all-btn');
-  if (confirmAllBtn) confirmAllBtn.disabled = false;
-  
-  const clearBtn = document.getElementById('clear-btn');
-  if (clearBtn) clearBtn.disabled = false;
-  
-  const exportCsvBtn = document.getElementById('export-csv-btn');
-  if (exportCsvBtn) exportCsvBtn.disabled = false;
-  
-  // updateExportButtonStatus 함수도 존재하는지 확인
-  if (typeof updateExportButtonStatus === 'function') {
-    updateExportButtonStatus();
-  }
+  document.getElementById('search-section').classList.remove('disabled');
+  document.getElementById('order-section').classList.remove('disabled');
+  document.getElementById('search-input').disabled = false;
+  document.getElementById('search-btn').disabled = false;
+  document.getElementById('save-draft-btn').disabled = false;
+  document.getElementById('confirm-selected-btn').disabled = false;
+  document.getElementById('confirm-all-btn').disabled = false;
+  document.getElementById('clear-btn').disabled = false;
+  document.getElementById('export-csv-btn').disabled = false;
+  updateExportButtonStatus();
 }
 
 // ===== 13. 발주서 생성/열기 =====
@@ -4295,21 +4270,15 @@ function updateBulkEditButton() {
 }
 
 function updateExportButtonStatus() {
-  const exportBtn = document.getElementById('export-csv-btn');
-  
-  // 버튼이 없으면 그냥 리턴 (오류 방지)
-  if (!exportBtn) {
-    console.log('export-csv-btn not found in DOM');
-    return;
-  }
-  
-  if (!AppState.currentOrderInfo || AppState.orderItems.length === 0) {
-    exportBtn.disabled = true;
-    return;
-  }
-  
-  const hasConfirmed = AppState.orderItems.some(item => item.status === '확정');
-  exportBtn.disabled = !hasConfirmed;
+ const exportBtn = document.getElementById('export-csv-btn');
+ 
+ if (!AppState.currentOrderInfo || AppState.orderItems.length === 0) {
+   exportBtn.disabled = true;
+   return;
+ }
+ 
+ const hasConfirmed = AppState.orderItems.some(item => item.status === '확정');
+ exportBtn.disabled = !hasConfirmed;
 }
 
 // ===== 25. 대시보드 기능 =====
