@@ -9,8 +9,8 @@ function initializeSmaregiConnection() {
     console.log('=== Smaregi API 초기화 시작 ===');
     
     // 1. 연결 테스트
-    const connectionTest = checkSmaregiConnection();
-    if (!connectionTest.connected) {
+    const connectionTest = testSmaregiConnection();
+    if (!connectionTest.success) {
       return {
         success: false,
         message: 'Smaregi API 연결 실패',
@@ -32,7 +32,6 @@ function initializeSmaregiConnection() {
     const scriptProps = PropertiesService.getScriptProperties();
     scriptProps.setProperty('SMAREGI_CONNECTED', 'true');
     scriptProps.setProperty('SMAREGI_LAST_SYNC', new Date().toISOString());
-    scriptProps.setProperty('SMAREGI_API_TYPE', connectionTest.apiType);
     
     console.log(`초기화 완료: ${stockData.count}개 상품`);
     
@@ -40,8 +39,7 @@ function initializeSmaregiConnection() {
       success: true,
       message: 'Smaregi API 연결 성공',
       itemCount: stockData.count,
-      storeId: stockData.storeId,
-      apiType: connectionTest.apiType
+      storeId: stockData.storeId
     };
     
   } catch (error) {
@@ -113,30 +111,25 @@ function detectLowStockItems() {
       };
     }
     
-    // 발주서 형식으로 변환
-    const orderItems = lowStockItems.map(item => ({
-      barcode: item.barcode,
-      name: item.name,
-      option: item.option,
-      supplierName: item.supplierName,
-      currentStock: item.currentStock,
-      suggestedQuantity: item.suggestedOrder,
-      isFrequent: item.isFrequent,
-      priority: item.currentStock === 0 ? '긴급' : '보통'
-    }));
+    // 발주 제안 추가
+    const suggestions = generateSmaregiOrderSuggestions({
+      threshold: threshold,
+      limit: 100
+    });
     
     return {
       success: true,
-      items: orderItems,
-      count: orderItems.length,
-      message: `${orderItems.length}개 재고 부족 상품 감지`
+      items: suggestions,
+      count: suggestions.length,
+      threshold: threshold,
+      timestamp: new Date().toISOString()
     };
     
   } catch (error) {
     console.error('재고 부족 감지 실패:', error);
     return {
       success: false,
-      message: '재고 부족 감지 실패',
+      items: [],
       error: error.toString()
     };
   }
@@ -243,25 +236,48 @@ function updateOrderWithSmaregiData(orderId) {
  */
 function getSmaregiSummary() {
   try {
-    const connection = checkSmaregiConnection();
+    // プラットフォームAPI使用可能かチェック
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // プラットフォームAPIモード
+        const testResult = testPlatformConnection();
+        
+        return {
+          success: true,
+          connected: testResult.success,
+          hasData: testResult.success && testResult.stores > 0,
+          message: testResult.message,
+          apiVersion: 'Platform API v4',
+          environment: config.ENVIRONMENT,
+          stores: testResult.stores || 0,
+          totalItems: 0,
+          outOfStock: 0,
+          lowStock: 0,
+          normalStock: 0
+        };
+      }
+    }
     
-    return {
-      success: true,
-      connected: connection.connected,
-      hasData: connection.hasData,
-      message: connection.message,
-      apiType: connection.apiType,
-      environment: connection.environment,
-      itemCount: connection.itemCount
-    };
-    
-  } catch (error) {
-    console.error('요약 정보 조회 실패:', error);
+    // API v2モード（データ取得不可）
     return {
       success: false,
       connected: false,
       hasData: false,
-      message: '정보 조회 실패',
+      message: 'API設定が必要です',
+      apiVersion: 'None',
+      totalItems: 0,
+      outOfStock: 0,
+      lowStock: 0,
+      normalStock: 0
+    };
+    
+  } catch (error) {
+    console.error('Smaregi 要約情報取得失敗:', error);
+    return {
+      success: false,
+      connected: false,
+      message: '接続エラー: ' + error.toString(),
       error: error.toString()
     };
   }
@@ -549,250 +565,78 @@ function syncSmaregiData() {
 }
 
 /**
- * Smaregi API 연결 상태 확인 (웹앱용)
+ * Smaregi 연결 상태 확인 (웹앱에서 호출)
  * @returns {Object} 연결 상태 정보
  */
 function checkSmaregiConnection() {
   try {
-    console.log('=== Smaregi API 연결 확인 ===');
+    console.log('=== Smaregi 연결 상태 확인 ===');
     
     // Platform API 확인
     if (CONFIG && CONFIG.PLATFORM_CONFIG) {
-      try {
-        const config = getCurrentConfig();
+      const config = getCurrentConfig();
+      
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // 토큰 확인
+        const tokenData = getPlatformAccessToken();
         
-        if (config.CLIENT_ID && config.CLIENT_SECRET) {
-          console.log(`Platform API 모드 (${config.ENVIRONMENT})`);
+        if (tokenData) {
+          // 재고 데이터 확인
+          const stockData = getSmaregiStockData();
           
-          // Platform API 연결 테스트
-          const testResult = testPlatformConnection();
-          
-          if (testResult.success) {
-            // 재고 데이터 샘플 확인
-            const stockTest = getPlatformStockDataOptimized();
+          if (stockData.success) {
+            console.log(`Platform API 연결 확인: ${stockData.count}개 상품`);
             
             return {
               connected: true,
-              hasData: stockTest.success && stockTest.count > 0,
-              itemCount: stockTest.count || 0,
+              hasData: true,
               apiType: 'platform',
-              environment: config.ENVIRONMENT,
-              message: `Platform API 연결 성공 (${stockTest.count || 0}개 상품)`
+              itemCount: stockData.count,
+              storeId: stockData.storeId,
+              message: 'Platform API 연결됨'
             };
           } else {
-            console.error('Platform API 연결 실패:', testResult.error);
-            
-            // Legacy API 시도
-            console.log('Legacy API로 fallback 시도');
-            const legacyTest = testSmaregiConnection();
-            
             return {
-              connected: legacyTest.success,
+              connected: true,
               hasData: false,
+              apiType: 'platform',
               itemCount: 0,
-              apiType: 'legacy',
-              message: legacyTest.success ? 'Legacy API 연결' : 'API 연결 실패',
-              error: testResult.error
+              message: 'API 연결됨 (데이터 없음)'
             };
           }
         }
-      } catch (configError) {
-        console.error('Platform API 설정 오류:', configError);
-        // Legacy API로 계속 진행
       }
     }
     
-    // Legacy API만 사용
-    console.log('Legacy API 모드');
-    const connectionTest = testSmaregiConnection();
-    
-    if (connectionTest.success) {
+    // Legacy API 확인
+    const legacyTest = testSmaregiConnection();
+    if (legacyTest.success) {
       const stockData = getSmaregiStockData();
       
       return {
         connected: true,
-        hasData: stockData.success && stockData.count > 0,
-        itemCount: stockData.count || 0,
+        hasData: stockData.success,
         apiType: 'legacy',
-        message: `Legacy API 연결 성공 (${stockData.count || 0}개 상품)`
+        itemCount: stockData.success ? stockData.count : 0,
+        message: 'Legacy API 연결됨'
       };
     }
     
+    // 연결 실패
     return {
       connected: false,
       hasData: false,
+      apiType: null,
       itemCount: 0,
-      apiType: 'none',
-      message: 'API 연결 실패',
-      error: connectionTest.error
+      message: 'API 연결 안됨'
     };
     
   } catch (error) {
-    console.error('연결 확인 중 오류:', error);
+    console.error('연결 상태 확인 실패:', error);
     return {
       connected: false,
       hasData: false,
-      itemCount: 0,
-      apiType: 'none',
-      message: '연결 확인 실패',
       error: error.toString()
     };
   }
-}
-
-/**
- * Platform API 연결 테스트
- * @returns {Object} 테스트 결과
- */
-function testPlatformConnection() {
-  try {
-    const config = getCurrentConfig();
-    console.log(`Platform API 연결 테스트 시작 (${config.ENVIRONMENT})`);
-    
-    const token = getPlatformAccessToken();
-    
-    if (!token) {
-      console.error('토큰 획득 실패로 연결 테스트 중단');
-      return {
-        success: false,
-        error: '토큰 획득 실패'
-      };
-    }
-    
-    // 매장 목록 조회로 테스트
-    const url = `${config.API_BASE_URL}${config.CONTRACT_ID}/pos/stores`;
-    console.log('테스트 URL:', url);
-    
-    const options = {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      muteHttpExceptions: true
-    };
-    
-    const response = UrlFetchApp.fetch(url, options);
-    const statusCode = response.getResponseCode();
-    const responseText = response.getContentText();
-    
-    console.log('연결 테스트 응답:', statusCode);
-    
-    if (statusCode === 200) {
-      const stores = JSON.parse(responseText);
-      console.log(`Platform API 연결 성공: ${stores.length}개 매장`);
-      
-      return {
-        success: true,
-        stores: stores.length,
-        data: stores
-      };
-    } else {
-      console.error(`Platform API 연결 실패: HTTP ${statusCode}`);
-      console.error('응답:', responseText);
-      return {
-        success: false,
-        error: `HTTP ${statusCode}: ${responseText}`
-      };
-    }
-    
-  } catch (error) {
-    console.error('Platform API 테스트 실패:', error);
-    return {
-      success: false,
-      error: error.toString()
-    };
-  }
-}
-
-/**
- * Platform API 액세스 토큰 획득
- * @returns {string|null} 액세스 토큰
- */
-function getPlatformAccessToken() {
-  try {
-    // 캐시 확인
-    const cache = CacheService.getScriptCache();
-    const cachedToken = cache.get('platform_access_token');
-    
-    if (cachedToken) {
-      console.log('캐시된 토큰 사용');
-      return cachedToken;
-    }
-    
-    const config = getCurrentConfig();
-    console.log(`Platform API 토큰 요청 (${config.ENVIRONMENT})`);
-    
-    // 토큰 요청
-    const tokenPayload = {
-      'grant_type': 'client_credentials',
-      'scope': config.SCOPES
-    };
-    
-    const authString = config.CLIENT_ID + ':' + config.CLIENT_SECRET;
-    const encodedAuth = Utilities.base64Encode(authString);
-    
-    const options = {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + encodedAuth,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      payload: Object.keys(tokenPayload).map(key => 
-        encodeURIComponent(key) + '=' + encodeURIComponent(tokenPayload[key])
-      ).join('&'),
-      muteHttpExceptions: true
-    };
-    
-    console.log('토큰 URL:', config.TOKEN_URL + 'token');
-    
-    const response = UrlFetchApp.fetch(config.TOKEN_URL + 'token', options);
-    const statusCode = response.getResponseCode();
-    const responseText = response.getContentText();
-    
-    console.log('토큰 응답 상태:', statusCode);
-    
-    if (statusCode === 200) {
-      const tokenData = JSON.parse(responseText);
-      const token = tokenData.access_token;
-      
-      // 캐시 저장 (50분)
-      cache.put('platform_access_token', token, 3000);
-      
-      console.log('Platform API 토큰 획득 성공');
-      return token;
-    } else {
-      console.error(`토큰 획득 실패: ${statusCode}`);
-      console.error('응답:', responseText);
-      return null;
-    }
-    
-  } catch (error) {
-    console.error('토큰 획득 중 오류:', error);
-    return null;
-  }
-}
-
-/**
- * Platform API 설정 가져오기
- * @returns {Object} 현재 환경 설정
- */
-function getCurrentConfig() {
-  if (!CONFIG || !CONFIG.PLATFORM_CONFIG) {
-    console.error('PLATFORM_CONFIG가 설정되지 않았습니다');
-    throw new Error('PLATFORM_CONFIG が設定されていません');
-  }
-  
-  const config = CONFIG.PLATFORM_CONFIG;
-  const isProduction = config.USE_PRODUCTION;
-  
-  return {
-    CONTRACT_ID: isProduction ? config.PROD_CONTRACT_ID : config.DEV_CONTRACT_ID,
-    CLIENT_ID: isProduction ? config.PROD_CLIENT_ID : config.DEV_CLIENT_ID,
-    CLIENT_SECRET: isProduction ? config.PROD_CLIENT_SECRET : config.DEV_CLIENT_SECRET,
-    TOKEN_URL: isProduction ? config.PROD_TOKEN_URL : config.DEV_TOKEN_URL,
-    API_BASE_URL: isProduction ? config.PROD_API_BASE_URL : config.DEV_API_BASE_URL,
-    SCOPES: config.SCOPES,
-    ENVIRONMENT: isProduction ? '본번환경' : '개발환경'
-  };
 }
