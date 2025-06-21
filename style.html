@@ -547,7 +547,7 @@ body {
 }
 
 .product-badge {
-    display: inline-block;
+    display: inline-block !important;
     padding: 3px 10px;
     font-size: 10px;
     font-weight: 600;
@@ -2891,7 +2891,7 @@ button .loading-spinner-small {
 }
 
 .settings-form {
-    max-width: 600px
+    max-width: 100%;
 }
 
 .settings-form h2 {
@@ -3888,14 +3888,31 @@ small {
     border: 1px solid #a5d6a7
 }
 
-.inline-stock-badge.no-data {
-    background-color: #f90000;
-    color: #ffffff;
-    border: 1px solid #e0e0e0;
+.stock-badge.no-data {
+    background: #f5f5f5;
+    color: #999;
 }
 
 .smaregi-status .status-icon {
-    font-size: 16px
+    font-size: 16px;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.smaregi-status.connected {
+    background: #e8f5e9;
+    color: #2e7d32;
 }
 
 .notification {
@@ -4030,16 +4047,54 @@ order-bottom: 1px solid #e9ecef;
 .stock-badge {
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 8px;
+    transition: all 0.2s ease;
 }
 
 .stock-badge.out-of-stock {
     background: #ffebee;
     color: #c62828;
+}
+
+.stock-badge .stock-icon {
+    font-size: 12px;
+}
+
+.stock-badge.loading {
+    background: #f5f5f5;
+    color: #999;
+}
+
+.stock-badge.loading .stock-text::after {
+    content: '';
+    animation: loading-dots 1.5s infinite;
+}
+
+@keyframes loading-dots {
+
+    0%,
+    20% {
+        content: '.';
+    }
+
+    40% {
+        content: '..';
+    }
+
+    60%,
+    100% {
+        content: '...';
+    }
+}
+
+.stock-badge.in-stock {
+    background: #e8f5e9;
+    color: #2e7d32;
 }
 
 .stock-badge.low-stock {
@@ -4405,8 +4460,10 @@ order-bottom: 1px solid #e9ecef;
     }
 
     .search-product-main {
-        display: block;
-        margin-bottom: 8px
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
     }
 
     .search-product-name {
@@ -5471,6 +5528,21 @@ body.sticky-footer-active {
 
 .search-item.compact .btn-sub-text {
     font-size: 10px;
+}
+
+.search-item.compact .stock-badge {
+    padding: 1px 6px;
+    font-size: 10px;
+}
+
+.search-item.compact .stock-badge .stock-icon {
+    font-size: 10px;
+}
+
+.search-item.compact .sales-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
 }
 
 /* ===== 출고 탭 스타일 ===== */
@@ -6775,305 +6847,677 @@ body.sticky-footer-active {
     font-size: 16px;
 }
 
+/* ===== 판매 기간 설정 스타일 ===== */
+.sales-period-inputs {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
 
+.period-input-group {
+    flex: 1;
+    min-width: 200px;
+}
 
+.sub-label {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.period-input-group .form-input {
+    width: 100%;
+}
+
+.input-hint {
+    display: inline-block;
+    margin-left: 5px;
+    font-size: 12px;
+    color: #999;
+}
+
+.field-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #666;
+    line-height: 1.5;
+}
+
+.input-hint {
+    font-size: 13px;
+    color: #999;
+    margin-left: 4px;
+}
+
+.sales-threshold-inputs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.threshold-input-group {
+    flex: 1;
+    min-width: 150px;
+    text-align: center;
+}
+
+.threshold-input-group .form-input {
+    width: 80px;
+    margin: 5px auto;
+    text-align: center;
+}
+
+.threshold-icon {
+    font-size: 24px;
+    margin-bottom: 5px;
+}
+
+.threshold-color {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: white;
+}
+
+.field-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #666;
+    line-height: 1.4;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+
+    .sales-period-inputs,
+    .sales-threshold-inputs {
+        grid-template-columns: 1fr;
+    }
+
+    .period-input-group,
+    .threshold-input-group {
+        flex-wrap: wrap;
+    }
+
+    .sub-label {
+        min-width: 100%;
+        margin-bottom: 4px;
+    }
+}
 
 /* Smaregi 상태 표시 스타일 */
 .smaregi-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: #f0f7ff;
-  border-radius: 20px;
-  font-size: 13px;
-}
-
-.smaregi-status.connected {
-  background: #e8f5e9;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #f5f5f5;
+    border-radius: 6px;
+    font-size: 13px;
 }
 
 .smaregi-status.error {
-  background: #ffebee;
+    background: #ffebee;
+}
+
+.smaregi-status .btn-sm {
+    padding: 2px 8px;
+    font-size: 12px;
+    margin-left: 4px;
 }
 
 .status-icon {
-  font-size: 16px;
+    font-size: 16px;
 }
 
 .smaregi-status.connected .status-icon {
-  color: #4caf50;
+    color: #4caf50;
 }
 
 .smaregi-status.error .status-icon {
-  color: #f44336;
+    color: #f44336;
 }
 
 /* 자동 제안 모달 스타일 */
 .suggest-header {
-  margin-bottom: 20px;
+    margin-bottom: 20px;
 }
 
 .suggest-stats {
-  display: flex;
-  gap: 20px;
-  margin-top: 10px;
-  padding: 10px;
-  background: #f5f5f5;
-  border-radius: 8px;
+    display: flex;
+    gap: 20px;
+    margin-top: 10px;
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 8px;
 }
 
 .stat-item strong {
-  color: #666;
+    color: #666;
 }
 
 .suggest-filters {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
-  padding: 10px;
-  background: #fafafa;
-  border-radius: 8px;
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+    padding: 10px;
+    background: #fafafa;
+    border-radius: 8px;
 }
 
 .suggest-list {
-  max-height: 400px;
-  overflow-y: auto;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 10px;
 }
 
 .suggest-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  margin-bottom: 8px;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    transition: all 0.2s;
 }
 
 .suggest-item:hover {
-  border-color: #2196F3;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-color: #2196F3;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .suggest-item.urgent {
-  border-left: 4px solid #f44336;
+    border-left: 4px solid #f44336;
 }
 
 .suggest-item.warning {
-  border-left: 4px solid #ff9800;
+    border-left: 4px solid #ff9800;
 }
 
 .suggest-item-info {
-  flex: 1;
+    flex: 1;
 }
 
 .suggest-product-name {
-  font-weight: 600;
-  margin-bottom: 4px;
+    font-weight: 600;
+    margin-bottom: 4px;
 }
 
 .suggest-details {
-  font-size: 12px;
-  color: #666;
+    font-size: 12px;
+    color: #666;
 }
 
 .suggest-reason {
-  display: inline-block;
-  padding: 2px 8px;
-  background: #e3f2fd;
-  color: #1976d2;
-  border-radius: 12px;
-  font-size: 11px;
-  margin-left: 8px;
+    display: inline-block;
+    padding: 2px 8px;
+    background: #e3f2fd;
+    color: #1976d2;
+    border-radius: 12px;
+    font-size: 11px;
+    margin-left: 8px;
 }
 
 .suggest-quantity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .suggest-stock {
-  font-size: 14px;
-  color: #666;
+    font-size: 14px;
+    color: #666;
 }
 
 .suggest-stock.critical {
-  color: #f44336;
-  font-weight: 600;
+    color: #f44336;
+    font-weight: 600;
 }
 
 /* 대시보드 재고 현황 스타일 */
 .smaregi-dashboard {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  margin-bottom: 30px;
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 30px;
 }
 
 .stock-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
 }
 
 .summary-card {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 10px;
-  transition: transform 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    transition: transform 0.2s;
 }
 
 .summary-card:hover {
-  transform: translateY(-2px);
+    transform: translateY(-2px);
 }
 
 .summary-card.alert {
-  background: #ffebee;
+    background: #ffebee;
 }
 
 .summary-card.warning {
-  background: #fff3e0;
+    background: #fff3e0;
 }
 
 .summary-card.success {
-  background: #e8f5e9;
+    background: #e8f5e9;
 }
 
 .card-icon {
-  font-size: 32px;
+    font-size: 32px;
 }
 
 .card-value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
 }
 
 .card-label {
-  font-size: 14px;
-  color: #666;
-  margin-top: 4px;
+    font-size: 14px;
+    color: #666;
+    margin-top: 4px;
 }
 
 .last-sync {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 15px;
-  border-top: 1px solid #e0e0e0;
-  font-size: 14px;
-  color: #666;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 15px;
+    border-top: 1px solid #e0e0e0;
+    font-size: 14px;
+    color: #666;
 }
 
 /* AI 제안 스타일 */
 .ai-suggestions {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  margin-bottom: 30px;
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 30px;
 }
 
 .suggestion-filters {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
 }
 
 .filter-btn {
-  padding: 8px 16px;
-  border: 1px solid #e0e0e0;
-  background: white;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: all 0.2s;
+    padding: 8px 16px;
+    border: 1px solid #e0e0e0;
+    background: white;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
 }
 
 .filter-btn.active {
-  background: #2196F3;
-  color: white;
-  border-color: #2196F3;
+    background: #2196F3;
+    color: white;
+    border-color: #2196F3;
 }
 
 .suggestion-list {
-  max-height: 300px;
-  overflow-y: auto;
-  margin-bottom: 20px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 20px;
 }
 
 .suggestion-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
-  transition: background 0.2s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.2s;
 }
 
 .suggestion-item:hover {
-  background: #f8f9fa;
+    background: #f8f9fa;
 }
 
 .suggestion-priority {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 10px;
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 10px;
 }
 
-.priority-1 { background: #f44336; }
-.priority-2 { background: #ff9800; }
-.priority-3 { background: #4caf50; }
+.priority-1 {
+    background: #f44336;
+}
+
+.priority-2 {
+    background: #ff9800;
+}
+
+.priority-3 {
+    background: #4caf50;
+}
 
 /* 차트 탭 스타일 */
 .chart-tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #f0f0f0;
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #f0f0f0;
 }
 
 .chart-tab {
-  padding: 10px 20px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  position: relative;
-  color: #666;
-  transition: color 0.2s;
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    color: #666;
+    transition: color 0.2s;
 }
 
 .chart-tab.active {
-  color: #2196F3;
+    color: #2196F3;
 }
 
 .chart-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: #2196F3;
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #2196F3;
 }
 
 @keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.5; }
-  100% { opacity: 1; }
+    0% {
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.6;
+    }
 }
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+    
+    .threshold-inputs {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .threshold-input-group {
+        text-align: left;
+    }
+}
+
+.badge-sales .sales-text {
+    font-size: 10px;
+}
+
+/* 로딩 상태 */
+.badge-sales.loading {
+    background: #e3f2fd;
+    color: #1976d2;
+    border-color: #bbdefb;
+}
+
+.badge-sales.loading .sales-text {
+    animation: pulse 1.5s infinite;
+}
+
+/* 판매 등급별 스타일 */
+.badge-sales.sales-hot {
+    background: #ffebee;
+    color: #d32f2f;
+    border-color: #ffcdd2;
+}
+
+.badge-sales.sales-popular {
+    background: #fff8e1;
+    color: #f57c00;
+    border-color: #ffe0b2;
+}
+
+.badge-sales.sales-normal {
+    background: #e8f5e9;
+    color: #388e3c;
+    border-color: #c8e6c9;
+}
+
+.badge-sales.sales-low {
+    background: #f5f5f5;
+    color: #757575;
+    border-color: #e0e0e0;
+}
+
+.badge-sales.sales-none {
+    background: #fafafa;
+    color: #9e9e9e;
+    border-color: #eeeeee;
+}
+
+/* 에러/연결 없음 상태 */
+.badge-sales.sales-disabled,
+.badge-sales.sales-error {
+    background: #fafafa;
+    color: #9e9e9e;
+    border-color: #eeeeee;
+    opacity: 0.7;
+}
+
+/* 판매 기간 설정 UI 스타일 */
+.settings-section {
+    margin-top: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.settings-section h3 {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+.section-desc {
+    margin: 0 0 20px 0;
+    font-size: 13px;
+    color: #666;
+}
+
+/* ===== 판매 정보 툴팁 스타일 ===== */
+/* styles.html에 추가 */
+
+/* 배지 컨테이너 */
+.badge-sales {
+    position: relative;
+    cursor: help;
+}
+
+/* 툴팁 스타일 */
+.sales-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    background: #333;
+    color: white;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    min-width: 160px;
+}
+
+/* 툴팁 화살표 */
+.sales-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #333;
+}
+
+/* 툴팁 헤더 */
+.tooltip-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    text-align: center;
+}
+
+/* 툴팁 내용 */
+.tooltip-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* 툴팁 행 */
+.tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.tooltip-label {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+}
+
+.tooltip-value {
+    font-weight: 500;
+    font-size: 12px;
+}
+
+/* 호버 효과 */
+.badge-sales:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 발주 목록의 코멘트 툴팁과 유사한 스타일 */
+.badge-sales:hover .sales-tooltip {
+    animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(-8px);
+    }
+}
+
+/* 반응형 - 모바일에서는 터치 시 표시 */
+@media (max-width: 768px) {
+    .badge-sales:active .sales-tooltip {
+        display: block;
+    }
+    
+    .sales-tooltip {
+        position: fixed;
+        bottom: auto;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        min-width: 200px;
+        padding: 16px;
+    }
+    
+    .sales-tooltip::after {
+        display: none;
+    }
+}
+
+/* 판매 데이터 새로고침 버튼 (설정 탭에 추가) */
+.refresh-sales-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 10px;
+}
+
+.refresh-sales-btn:hover {
+    background: #e0e0e0;
+    border-color: #bbb;
+}
+
+.refresh-sales-btn:active {
+    transform: scale(0.98);
+}
+
+.refresh-sales-btn .icon {
+    font-size: 16px;
+    animation: spin 2s linear infinite paused;
+}
+
+.refresh-sales-btn.loading .icon {
+    animation-play-state: running;
+}
+
+/* 판매 데이터 상태 표시 */
+.sales-data-status {
+    display: inline-block;
+    margin-left: 10px;
+    font-size: 12px;
+    color: #666;
+}
+
+.sales-data-status.success {
+    color: #4caf50;
+}
+
+.sales-data-status.error {
+    color: #f44336;
+}
+
 
 </style >
