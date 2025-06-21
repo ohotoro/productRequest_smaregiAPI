@@ -564,10 +564,7 @@ function syncSmaregiData() {
   }
 }
 
-/**
- * Smaregi 연결 상태 확인 (웹앱에서 호출)
- * @returns {Object} 연결 상태 정보
- */
+// checkSmaregiConnection 함수 개선 (smaregiManager.gs)
 function checkSmaregiConnection() {
   try {
     console.log('=== Smaregi 연결 상태 확인 ===');
@@ -580,12 +577,15 @@ function checkSmaregiConnection() {
         // 토큰 확인
         const tokenData = getPlatformAccessToken();
         
-        if (tokenData) {
-          // 재고 데이터 확인
+        if (tokenData && tokenData.access_token) {
+          console.log('토큰 발급 성공');
+          console.log('스코프:', tokenData.scope);
+          
+          // 재고 데이터 확인 (캐시 활용)
           const stockData = getSmaregiStockData();
           
-          if (stockData.success) {
-            console.log(`Platform API 연결 확인: ${stockData.count}개 상품`);
+          if (stockData.success && stockData.count > 0) {
+            console.log(`Platform API 연결 확인: ${stockData.count}개 재고`);
             
             return {
               connected: true,
@@ -593,33 +593,23 @@ function checkSmaregiConnection() {
               apiType: 'platform',
               itemCount: stockData.count,
               storeId: stockData.storeId,
-              message: 'Platform API 연결됨'
+              message: `Platform API 연결됨 (${stockData.count}개 상품)`
             };
           } else {
+            // 재고 데이터가 없으면 상품 수만 확인
+            const productMap = getAllProductsMap();
+            const productCount = Object.keys(productMap).length;
+            
             return {
               connected: true,
-              hasData: false,
+              hasData: productCount > 0,
               apiType: 'platform',
-              itemCount: 0,
-              message: 'API 연결됨 (데이터 없음)'
+              itemCount: productCount,
+              message: `API 연결됨 (${productCount}개 상품 등록)`
             };
           }
         }
       }
-    }
-    
-    // Legacy API 확인
-    const legacyTest = testSmaregiConnection();
-    if (legacyTest.success) {
-      const stockData = getSmaregiStockData();
-      
-      return {
-        connected: true,
-        hasData: stockData.success,
-        apiType: 'legacy',
-        itemCount: stockData.success ? stockData.count : 0,
-        message: 'Legacy API 연결됨'
-      };
     }
     
     // 연결 실패
@@ -628,7 +618,7 @@ function checkSmaregiConnection() {
       hasData: false,
       apiType: null,
       itemCount: 0,
-      message: 'API 연결 안됨'
+      message: 'API 설정 없음'
     };
     
   } catch (error) {
