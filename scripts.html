@@ -517,50 +517,44 @@ document.addEventListener('DOMContentLoaded', async function() {
   showLoading('초기 설정 로드 중...');
   
   try {
-    // 1단계: 기본 설정 로드
-    const [settings, translations, orderInfo] = await Promise.all([
+    // 1단계: 핵심 설정만 먼저 로드
+    const [settings, translations] = await Promise.all([
       loadSettingsDataOnly().catch(() => ({})),
-      initializeLanguage().catch(() => ({})),
-      checkCurrentOrderAsync().catch(() => null)
+      initializeLanguage().catch(() => ({}))
     ]);
     
     AppState.settings = settings;
     AppState.translations = translations;
     
-    await loadVoiceSettings();
+    // UI 기본 설정
     setupEventListeners();
+    await loadVoiceSettings();
     
-    if (orderInfo) {
-      AppState.currentOrderInfo = orderInfo;
-      updateOrderStatus();
-      enableOrderFeatures();
-    }
+    // 2단계: 최소 필수 데이터만 로드
+    updateLoadingMessage('필수 데이터 로드 중...');
     
-    // 2단계: 데이터 로드와 API 연결을 병렬로 처리
-    updateLoadingMessage('데이터 로드 중...');
+    // 현재 주문 확인 (비동기)
+    const orderPromise = checkCurrentOrderAsync().then(orderInfo => {
+      if (orderInfo) {
+        AppState.currentOrderInfo = orderInfo;
+        updateOrderStatus();
+        enableOrderFeatures();
+      }
+      return orderInfo;
+    });
     
-    const dataPromises = [
-      loadInitialProductsWithIssuesAsync(),
-      loadSmaregiDataAsync(),
-      loadCategoryRulesAsync().catch(() => ({})),
-      checkSmaregiConnectionAsync(),
-      loadSalesDataAsync()  // 판매 데이터 로드 추가
-    ];
+    // 초기 상품 데이터 (캐시 우선)
+    const productsPromise = loadInitialProductsFromCache();
     
-    if (orderInfo) {
-      dataPromises.push(
-        loadOrderItemsFromSheetAsync().then(items => {
-          console.log('발주 항목 로드 완료:', items ? items.length : 0);
-          requestAnimationFrame(() => {
-            updateOrderList();
-            updateOrderSummary();
-          });
-          return items;
-        })
-      );
-    }
+    // 기본 카테고리 규칙
+    const categoryPromise = loadCategoryRulesAsync().catch(() => ({}));
     
-    const results = await Promise.all(dataPromises);
+    // 병렬 실행
+    const [orderInfo, products] = await Promise.all([
+      orderPromise,
+      productsPromise,
+      categoryPromise
+    ]);
     
     // UI 초기화
     requestAnimationFrame(() => {
@@ -569,22 +563,25 @@ document.addEventListener('DOMContentLoaded', async function() {
       setupStickyFooter();
     });
     
-    startAutoSave();
-    
-    if (AppState.currentOrderInfo && !restoreSession()) {
-      console.log('세션 복원 스킵');
-    }
-    
-    const loadTime = (performance.now() - startTime) / 1000;
-    console.log(`전체 초기화 완료: ${loadTime.toFixed(1)}초`);
-    
+    // 3단계: 백그라운드에서 나머지 데이터 로드
     hideLoading();
+    const loadTime = (performance.now() - startTime) / 1000;
     showQuickSuccess(`초기화 완료 (${loadTime.toFixed(1)}초)`);
     
     // 백그라운드 작업
     setTimeout(() => {
-      prefetchFrequentProducts();
-    }, 3000);
+      // Smaregi 데이터는 백그라운드에서 로드
+      loadSmaregiDataInBackground();
+      // 판매 데이터도 백그라운드
+      loadSalesDataInBackground();
+      // 발주 항목 로드
+      if (orderInfo) {
+        loadOrderItemsInBackground();
+      }
+    }, 100);
+    
+    // 자동 저장 시작
+    startAutoSave();
     
   } catch (error) {
     console.error('초기화 중 오류:', error);
@@ -592,6 +589,112 @@ document.addEventListener('DOMContentLoaded', async function() {
     showError('앱 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
   }
 });
+
+// 캐시에서 초기 상품 로드
+async function loadInitialProductsFromCache() {
+  // 로컬 스토리지에서 먼저 확인
+  const localCache = localStorage.getItem('initial_products_cache');
+  if (localCache) {
+    try {
+      const cached = JSON.parse(localCache);
+      const age = Date.now() - cached.timestamp;
+      if (age < 30 * 60 * 1000) { // 30분
+        AppState.products = cached.products;
+        AppState.productIssues = cached.productIssues || {};
+        console.log('로컬 캐시에서 상품 데이터 복원');
+        return cached.products;
+      }
+    } catch (e) {
+      console.error('로컬 캐시 파싱 실패:', e);
+    }
+  }
+  
+  // 서버에서 로드
+  return loadInitialProductsWithIssuesAsync();
+}
+
+// 백그라운드 Smaregi 데이터 로드
+function loadSmaregiDataInBackground() {
+  // 프로그레스 바 표시 (하단에 작게)
+  const progressBar = document.createElement('div');
+  progressBar.className = 'background-loading';
+  progressBar.innerHTML = '<span>재고 데이터 로드 중...</span>';
+  document.body.appendChild(progressBar);
+  
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (result && result.data) {
+        AppState.smaregiData = result.data;
+        AppState.smaregiUploadTime = result.uploadTime;
+        AppState.smaregiDataLoaded = true;
+        console.log(`Smaregi 데이터 로드: ${Object.keys(result.data).length}개`);
+        
+        // 연결 상태 업데이트
+        checkSmaregiConnectionAsync();
+      }
+      progressBar.remove();
+    })
+    .withFailureHandler((error) => {
+      console.warn('Smaregi 데이터 로드 실패:', error);
+      progressBar.remove();
+    })
+    .getSmaregiData();
+}
+
+// 백그라운드 판매 데이터 로드
+function loadSalesDataInBackground() {
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (result && result.success && result.data) {
+        // 데이터 구조 변환
+        const salesDataObj = {};
+        
+        if (typeof result.data === 'object' && !Array.isArray(result.data)) {
+          Object.keys(result.data).forEach(barcode => {
+            const item = result.data[barcode];
+            salesDataObj[barcode] = {
+              quantity: item.quantity || 0,
+              avgDaily: item.quantity ? (item.quantity / (result.period || 30)) : 0,
+              amount: item.amount || 0,
+              trend: item.trend || 'stable',
+              transactions: item.transactions || []
+            };
+          });
+        }
+        
+        AppState.salesData = salesDataObj;
+        AppState.salesDataLoaded = true;
+        AppState.salesDataTimestamp = result.timestamp;
+        AppState.salesDataPeriod = result.period || 30;
+        
+        console.log(`판매 데이터 로드 완료: ${Object.keys(salesDataObj).length}개 상품`);
+      }
+    })
+    .withFailureHandler((error) => {
+      console.warn('판매 데이터 로드 실패:', error);
+      AppState.salesData = {};
+      AppState.salesDataLoaded = false;
+    })
+    .loadAllProductsSalesData(); // getSalesData 대신 loadAllProductsSalesData 사용
+}
+
+// 백그라운드 발주 항목 로드
+function loadOrderItemsInBackground() {
+  if (!AppState.currentOrderInfo?.orderId) return;
+  
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (result?.success && result.items) {
+        AppState.orderItems = result.items;
+        requestAnimationFrame(() => {
+          updateOrderList();
+          updateOrderSummary();
+        });
+      }
+    })
+    .withFailureHandler(console.error)
+    .loadOrderItems(AppState.currentOrderInfo.orderId);
+}
 
 // Smaregi 연결 확인 비동기 버전
 function checkSmaregiConnectionAsync() {
