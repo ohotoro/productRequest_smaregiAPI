@@ -11,6 +11,7 @@ function getSmaregiAuthHeaders() {
     'Content-Type': 'application/json'
   };
 }
+
 /**
  * Smaregi API 연결 테스트
  * @returns {Object} 연결 상태
@@ -19,16 +20,6 @@ function testSmaregiConnection() {
   try {
     console.log('=== Smaregi API 연결 테스트 시작 ===');
     
-    // Platform API 사용 확인
-    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
-      const config = getCurrentConfig();
-      if (config.CLIENT_ID && config.CLIENT_SECRET) {
-        console.log('Platform API 연결 테스트');
-        return testPlatformConnection();
-      }
-    }
-    
-    // 기존 Legacy API 테스트
     const url = `${CONFIG.SMAREGI.API_BASE_URL}pos/stores`;
     const options = {
       method: 'GET',
