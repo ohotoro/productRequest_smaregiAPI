@@ -543,19 +543,34 @@ function getProductSalesInfo(barcode) {
   }
 }
 
-// isSmaregiAvailable 함수 추가 또는 수정
+// isSmaregiAvailable 함수 수정
 function isSmaregiAvailable() {
   try {
+    // 캐시 확인
+    const cacheKey = 'smaregi_available';
+    const cached = getCache(cacheKey);
+    
+    if (cached !== null) {
+      return cached;
+    }
+    
     // Platform API 사용 가능 확인
     if (CONFIG && CONFIG.PLATFORM_CONFIG) {
       const config = getCurrentConfig();
       if (config.CLIENT_ID && config.CLIENT_SECRET) {
-        // 토큰이 있는지만 확인
+        // 토큰이 있는지 확인
         const token = getPlatformAccessToken();
-        return token && token.access_token ? true : false;
+        const available = !!(token && token.access_token);
+        
+        // 캐시 저장 (5분)
+        setCache(cacheKey, available, 300);
+        
+        console.log(`Smaregi API 사용 가능: ${available}`);
+        return available;
       }
     }
     
+    console.log('Smaregi API 설정 없음');
     return false;
     
   } catch (error) {
