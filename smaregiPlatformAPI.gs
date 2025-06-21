@@ -101,6 +101,83 @@ function getCurrentConfig() {
   };
 }
 
+// getPlatformAccessToken 함수 - 토큰 발급
+function getPlatformAccessToken() {
+  try {
+    console.log('=== プラットフォームAPI アクセストークン取得 ===');
+    
+    const config = getCurrentConfig();
+    console.log(`環境: ${config.ENVIRONMENT}`);
+    
+    // CLIENT_ID/SECRET チェック
+    if (!config.CLIENT_ID || !config.CLIENT_SECRET) {
+      console.error('CLIENT_ID または CLIENT_SECRET が設定されていません');
+      return null;
+    }
+    
+    // キャッシュ確認
+    const cached = getCache('platform_access_token');
+    if (cached && cached.expires_at > new Date().getTime()) {
+      console.log('キャッシュされたトークンを使用');
+      return cached;
+    }
+    
+    const url = `${config.TOKEN_URL}${config.CONTRACT_ID}/token`;
+    
+    // Basic Authentication 생성
+    const credentials = Utilities.base64Encode(`${config.CLIENT_ID}:${config.CLIENT_SECRET}`);
+    
+    // 스코프 포함
+    const formData = {
+      'grant_type': 'client_credentials',
+      'scope': config.SCOPES
+    };
+    
+    const payload = Object.keys(formData)
+      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(formData[key])}`)
+      .join('&');
+    
+    const options = {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      payload: payload,
+      muteHttpExceptions: true
+    };
+    
+    console.log('토큰 요청 URL:', url);
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const statusCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    console.log('応답 상태:', statusCode);
+    
+    if (statusCode === 200) {
+      const tokenData = JSON.parse(responseText);
+      
+      // 有効期限を計算（通常1時間）
+      tokenData.expires_at = new Date().getTime() + (tokenData.expires_in * 1000) - 60000;
+      
+      // キャッシュ保存
+      setCache('platform_access_token', tokenData, tokenData.expires_in - 60);
+      
+      console.log('アクセストークン取得成功');
+      return tokenData;
+      
+    } else {
+      console.error('トークン取得失敗:', responseText);
+      return null;
+    }
+    
+  } catch (error) {
+    console.error('アクセストークン取得エラー:', error);
+    return null;
+  }
+}
+
 // callPlatformAPI 함수 - API 호출
 function callPlatformAPI(endpoint, method = 'GET', payload = null) {
   try {
@@ -169,6 +246,53 @@ function getPlatformStores() {
   } catch (error) {
     console.error('店舗一覧取得エラー:', error);
     return [];
+  }
+}
+
+// testPlatformConnection 함수 - 연결 테스트
+function testPlatformConnection() {
+  try {
+    console.log('=== Platform API 연결 테스트 ===');
+    
+    // 토큰 발급 테스트
+    const tokenData = getPlatformAccessToken();
+    
+    if (!tokenData) {
+      return {
+        success: false,
+        message: '토큰 발급 실패'
+      };
+    }
+    
+    console.log('토큰 스코프:', tokenData.scope);
+    
+    // 매장 조회로 연결 확인
+    const result = callPlatformAPI('pos/stores');
+    
+    if (result.success) {
+      console.log(`✅ 연결 성공: ${result.data.length}개 매장`);
+      return {
+        success: true,
+        message: 'Platform API 연결 성공',
+        stores: result.data.length,
+        data: result.data
+      };
+    } else {
+      console.error('❌ API 호출 실패:', result.error);
+      return {
+        success: false,
+        message: `API 호출 실패: ${result.statusCode}`,
+        error: result.error
+      };
+    }
+    
+  } catch (error) {
+    console.error('Platform API 테스트 실패:', error);
+    return {
+      success: false,
+      message: '연결 테스트 실패',
+      error: error.toString()
+    };
   }
 }
 
