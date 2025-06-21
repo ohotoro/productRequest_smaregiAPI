@@ -3129,7 +3129,18 @@ function loadSearchResultsStock(results) {
   
   // 로컬 데이터에서 재고 정보 업데이트
   results.forEach(product => {
-    const stockQuantity = AppState.smaregiData[product.barcode] || 0;
+    const stockData = AppState.smaregiData[product.barcode];
+    let stockQuantity = 0;
+    
+    // stockData가 객체인 경우 quantity 속성 추출
+    if (stockData) {
+      if (typeof stockData === 'object') {
+        stockQuantity = stockData.quantity || stockData.availableQuantity || 0;
+      } else {
+        stockQuantity = stockData;
+      }
+    }
+    
     updateStockBadge(product.barcode, {
       stock: stockQuantity,
       availableStock: stockQuantity
