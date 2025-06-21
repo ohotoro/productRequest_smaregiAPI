@@ -578,3 +578,4 @@ function isSmaregiAvailable() {
     return false;
   }
 }
+
