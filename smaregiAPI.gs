@@ -60,7 +60,20 @@ function getSmaregiStockByBarcode(barcode, storeId = null) {
       const config = getCurrentConfig();
       if (config.CLIENT_ID && config.CLIENT_SECRET) {
         console.log('Platform API로 바코드 재고 조회');
-        return getPlatformStockByBarcode(barcode, storeId);
+        const result = getPlatformStockByBarcode(barcode, storeId);
+        
+        // 결과가 객체인 경우 stock 값 추출
+        if (result.success && typeof result.stock === 'object') {
+          return {
+            success: true,
+            barcode: barcode,
+            stock: result.stock.quantity || 0,  // 객체에서 quantity 추출
+            productName: result.productName,
+            updatedAt: result.updatedAt || new Date().toISOString()
+          };
+        }
+        
+        return result;
       }
     }
     
@@ -74,14 +87,11 @@ function getSmaregiStockByBarcode(barcode, storeId = null) {
       return {
         success: true,
         barcode: barcode,
-        stock: stockData.data[barcode].quantity,
+        stock: stockData.data[barcode].quantity || 0,
         productName: stockData.data[barcode].productName,
         updatedAt: stockData.data[barcode].updatedAt
       };
     }
-    
-    // 기존 코드 유지...
-    // (기존 Legacy API 개별 조회 코드가 있다면 그대로 둡니다)
     
     return {
       success: false,
