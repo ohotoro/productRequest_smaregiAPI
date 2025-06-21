@@ -2405,6 +2405,11 @@ function sortSearchResults(results, query) {
   });
 }
 
+// showProductIssueModal 함수 추가 (openProductIssueModal의 별칭)
+function showProductIssueModal(barcode = null) {
+  openProductIssueModal(barcode);
+}
+
 function displaySearchResults(results) {
   const container = document.getElementById('search-results');
   const displaySettings = loadDisplaySettings();
@@ -2417,7 +2422,8 @@ function displaySearchResults(results) {
   
   // AppState에서 데이터 가져오기
   const smaregiData = AppState.smaregiData || {};
-  const salesData = AppState.salesData || {};  // 판매 데이터 추가
+  const salesData = AppState.salesData || {};
+  const hasSmaregiData = AppState.smaregiConnected && AppState.smaregiDataLoaded;
   
   let html = `
     <div class="search-results-header">
@@ -2431,8 +2437,19 @@ function displaySearchResults(results) {
     if (product.isFrequent === true) badges += '<span class="product-badge badge-frequent">자주발주</span>';
     if (product.isRecent === true) badges += '<span class="product-badge badge-recent">최근</span>';
     
-    const productSalesData = salesData[product.barcode];
-    const salesBadge = createSalesBadge(product.barcode, productSalesData);
+    // 판매 배지 생성 - 초기에는 로딩 상태로
+    let salesBadge = '';
+    if (AppState.smaregiConnected) {
+      if (AppState.salesDataLoaded && salesData[product.barcode]) {
+        salesBadge = createSalesBadge(product.barcode, salesData[product.barcode]);
+      } else {
+        // 판매 데이터 로딩 중
+        salesBadge = `<span class="badge badge-sales sales-loading" data-barcode="${product.barcode}">
+          <span class="sales-icon" style="display: inline-flex;">⏳</span>
+          <span class="sales-text">loading..</span>
+        </span>`;
+      }
+    }
     
     const colorSizeInfo = parseColorSize(product.option);
     let issueIcon = '';
@@ -2444,29 +2461,58 @@ function displaySearchResults(results) {
       if (memo.includes('불량') || memo.includes('주의')) issueClass += ' issue-critical';
       else if (memo.includes('교환') || memo.includes('변경')) issueClass += ' issue-warning';
       
-      issueIcon = `<span class="${issueClass}" title="${memo}" onclick="showProductIssueModal('${product.barcode}')">⚠️</span>`;
+      issueIcon = `<span class="${issueClass}" 
+                         title="${memo}" 
+                         onclick="showProductIssueModal('${product.barcode}')"
+                         style="cursor: pointer;">⚠️</span>`;
     }
     
     const existingOrder = AppState.orderItems.find(item => item.barcode === product.barcode);
-    const storeStock = smaregiData[product.barcode] || null;
+    const storeStock = smaregiData[product.barcode];
     
+    // 재고 표시 개선
     let stockDisplay = '';
-    if (storeStock !== null) {
-      const stockClass = storeStock === 0 ? 'out-of-stock' : storeStock < 10 ? 'low-stock' : 'in-stock';
-      const stockText = storeStock === 0 ? '품절' : `${storeStock}개`;
-      stockDisplay = `
-        <span class="stock-badge ${stockClass}" data-barcode="${product.barcode}">
-          <span class="stock-text">${stockText}</span>
-        </span>
-      `;
+    if (hasSmaregiData) {
+      if (storeStock !== undefined && storeStock !== null) {
+        // storeStock이 객체인 경우 처리
+        const stockQuantity = typeof storeStock === 'object' ? 
+          (storeStock.availableQuantity || storeStock.quantity || 0) : 
+          storeStock;
+          
+        const stockClass = stockQuantity === 0 ? 'out-of-stock' : 
+                          stockQuantity < 10 ? 'low-stock' : 'in-stock';
+        const stockText = stockQuantity === 0 ? '품절' : `${stockQuantity}개`;
+        
+        stockDisplay = `
+          <span class="stock-badge ${stockClass}" data-barcode="${product.barcode}">
+            <span class="stock-text">${stockText}</span>
+          </span>
+        `;
+      } else {
+        // 재고 정보 없음
+        stockDisplay = `
+          <span class="stock-badge no-data" data-barcode="${product.barcode}">
+            <span class="stock-text">재고없음</span>
+          </span>
+        `;
+      }
     } else if (AppState.smaregiConnected) {
+      // API 연결됨 but 데이터 로딩 중
       stockDisplay = `
         <span class="stock-badge loading" data-barcode="${product.barcode}">
-          <span class="stock-text">로딩중...</span>
+          <span class="stock-text">확인중...</span>
+        </span>
+      `;
+    } else {
+      // API 미연결
+      stockDisplay = `
+        <span class="stock-badge disabled" data-barcode="${product.barcode}">
+          <span class="stock-text">-</span>
         </span>
       `;
     }
     
+    // 버튼 HTML
     let buttonHtml = '';
     if (existingOrder) {
       if (existingOrder.confirmed) {
@@ -2502,6 +2548,7 @@ function displaySearchResults(results) {
       buttonHtml = `<button class="add-to-order-btn" onclick="addToOrderWithData('${product.barcode}', this)">발주추가</button>`;
     }
     
+    // 색상/사이즈 HTML
     let colorSizeHtml = '';
     if (colorSizeInfo.hasColorSize) {
       colorSizeHtml = `
@@ -2515,6 +2562,25 @@ function displaySearchResults(results) {
       `;
     }
     
+    // 재고 정보 정리 (객체인 경우 처리)
+    const storeStockForData = typeof storeStock === 'object' ? {
+      availableQuantity: storeStock.availableQuantity || 0,
+      productCode: product.barcode,
+      quantity: storeStock.quantity || 0,
+      layawayQuantity: storeStock.layawayQuantity || 0,
+      storeId: storeStock.storeId || "2",
+      productName: product.name,
+      updatedAt: storeStock.updatedAt || new Date().toISOString()
+    } : {
+      availableQuantity: storeStock || 0,
+      productCode: product.barcode,
+      quantity: storeStock || 0,
+      layawayQuantity: 0,
+      storeId: "2",
+      productName: product.name,
+      updatedAt: new Date().toISOString()
+    };
+    
     const productDataJson = JSON.stringify({
       barcode: product.barcode,
       name: product.name,
@@ -2524,7 +2590,7 @@ function displaySearchResults(results) {
       weight: product.weight || '',
       memo: product.memo || '',
       remarks: product.remarks || '',
-      storeStock: storeStock
+      storeStock: storeStockForData
     }).replace(/"/g, '&quot;');
     
     return `
@@ -2553,34 +2619,82 @@ function displaySearchResults(results) {
   container.innerHTML = html;
   filterSearchResults();
   
-  // 툴팁 이벤트 초기화 추가
-  initializeSalesTooltips();
-  
-  // 재고 정보 로드
-  if (AppState.smaregiConnected && AppState.smaregiDataLoaded) {
-    loadSearchResultsStock(results);
+  // 재고 정보가 이미 로드되어 있으면 즉시 업데이트
+  if (hasSmaregiData) {
+    console.log('재고 데이터 이미 로드됨, 즉시 업데이트');
+    // 이미 표시했으므로 추가 작업 불필요
   }
   
-  // 판매 데이터 로드
-  if (AppState.smaregiConnected && !AppState.salesDataLoaded) {
-    // 판매 데이터가 아직 로드되지 않은 경우
-    loadSalesDataAsync().then(() => {
-      // 판매 데이터 로드 후 배지 업데이트
-      results.forEach(product => {
-        const salesData = AppState.salesData[product.barcode];
-        if (salesData) {
+  // 판매 데이터 처리
+  if (AppState.smaregiConnected) {
+    if (AppState.salesDataLoaded) {
+      // 판매 데이터가 이미 로드된 경우 - 로딩 배지를 실제 데이터로 교체
+      setTimeout(() => {
+        results.forEach(product => {
+          const productSalesData = AppState.salesData[product.barcode];
           const badge = document.querySelector(`.badge-sales[data-barcode="${product.barcode}"]`);
-          if (badge) {
-            const newBadgeHtml = createSalesBadge(product.barcode, salesData);
+          
+          if (badge && badge.classList.contains('sales-loading')) {
+            const newBadgeHtml = createSalesBadge(product.barcode, productSalesData);
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = newBadgeHtml;
             badge.replaceWith(tempDiv.firstChild);
           }
-        }
-      });
-      initializeSalesTooltips();
-    });
+        });
+        initializeSalesTooltips();
+      }, 100);
+    } else {
+      // 판매 데이터가 아직 로드되지 않은 경우
+      console.log('판매 데이터 로드 대기 중...');
+      
+      loadSalesDataAsync()
+        .then(() => {
+          console.log('판매 데이터 로드 완료, 배지 업데이트');
+          
+          // 판매 데이터 로드 후 배지 업데이트
+          results.forEach(product => {
+            const productSalesData = AppState.salesData[product.barcode];
+            const badge = document.querySelector(`.badge-sales[data-barcode="${product.barcode}"]`);
+            
+            if (badge) {
+              const newBadgeHtml = createSalesBadge(product.barcode, productSalesData);
+              const tempDiv = document.createElement('div');
+              tempDiv.innerHTML = newBadgeHtml;
+              badge.replaceWith(tempDiv.firstChild);
+            }
+          });
+          
+          initializeSalesTooltips();
+        })
+        .catch(error => {
+          console.error('판매 데이터 로드 실패:', error);
+          
+          // 에러 시 로딩 배지를 에러 상태로 변경
+          document.querySelectorAll('.badge-sales.sales-loading').forEach(badge => {
+            badge.classList.remove('sales-loading');
+            badge.classList.add('sales-error');
+            badge.querySelector('.sales-icon').textContent = '⚠️';
+            badge.querySelector('.sales-text').textContent = '오류';
+          });
+        });
+    }
   }
+  
+  // 툴팁 초기화 (약간의 지연 후)
+  setTimeout(() => {
+    initializeSalesTooltips();
+  }, 100);
+}
+
+// showProductIssueModal 함수 확인 (없으면 추가)
+if (typeof showProductIssueModal === 'undefined') {
+  window.showProductIssueModal = function(barcode) {
+    if (typeof openProductIssueModal === 'function') {
+      openProductIssueModal(barcode);
+    } else {
+      console.error('openProductIssueModal 함수를 찾을 수 없습니다.');
+    }
+  };
 }
 
 // ===== 판매 데이터 로드 함수 추가 =====
@@ -4260,7 +4374,8 @@ function parseColorSize(optionText) {
     color: colorPart,
     colorHex: hexColor,
     size: sizePart,
-    display: optionText
+    display: optionText,
+    hasColorSize: true
   };
 }
 
