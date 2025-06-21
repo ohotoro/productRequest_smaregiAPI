@@ -782,10 +782,12 @@ function getPlatformSalesDataComplete(days = 30) {
     
     const stores = getPlatformStores();
     if (!stores || stores.length === 0) {
+      console.log('매장 정보를 가져올 수 없습니다');
       return { success: false, message: '매장 정보 없음' };
     }
     
     const storeId = stores[0].storeId;
+    console.log(`매장 ID: ${storeId}`);
     
     // ISO 8601 날짜 설정
     const endDate = new Date();
@@ -799,6 +801,7 @@ function getPlatformSalesDataComplete(days = 30) {
     
     // 전체 상품 맵 가져오기
     const productMap = getAllProductsMap();
+    console.log(`상품 맵: ${Object.keys(productMap).length}개`);
     
     // 판매 데이터 수집
     const salesMap = {};
@@ -818,58 +821,54 @@ function getPlatformSalesDataComplete(days = 30) {
       ].join('&');
       
       const endpoint = `pos/transactions?${params}`;
+      console.log(`거래 목록 조회 (페이지 ${page})`);
+      
       const result = callPlatformAPI(endpoint);
       
       if (!result.success) {
-        console.log('거래 조회 종료');
+        console.log('거래 조회 실패:', result.error);
         break;
       }
       
       const transactions = result.data;
       if (!transactions || transactions.length === 0) {
+        console.log('더 이상 거래가 없습니다');
         break;
       }
       
-      console.log(`페이지 ${page}: ${transactions.length}개 거래 처리 중...`);
+      console.log(`페이지 ${page}: ${transactions.length}개 거래 발견`);
       
-      // 각 거래의 상세 내역 조회
+      // 각 거래의 상세 정보 조회 (배치 처리)
       for (let i = 0; i < transactions.length; i++) {
         const transaction = transactions[i];
         
-        // 취소된 거래는 스킵
-        if (transaction.cancelDivision !== '0') {
-          continue;
-        }
-        
-        if (transaction.transactionHeadId) {
-          // 거래 상세 조회
+        try {
+          // 거래 상세 조회 (transactionHeadId 사용)
           const detailEndpoint = `pos/transactions/${transaction.transactionHeadId}/details`;
           const detailResult = callPlatformAPI(detailEndpoint);
           
           if (detailResult.success && detailResult.data) {
-            const details = detailResult.data;
-            
-            // 각 상품 처리
-            details.forEach(detail => {
+            // 각 상품별 판매 데이터 집계
+            detailResult.data.forEach(detail => {
               const productCode = detail.productCode;
-              
-              if (!productCode) return;
+              const productName = productMap[productCode]?.productName || detail.productName || '상품명 없음';
+              const quantity = detail.quantity || 0;
+              const price = detail.unitTransactionPrice || 0;
+              const subtotal = detail.subtotal || 0;
               
               if (!salesMap[productCode]) {
                 salesMap[productCode] = {
+                  productCode: productCode,
+                  productName: productName,
                   quantity: 0,
                   amount: 0,
                   transactions: [],
-                  productName: detail.productName || productMap[productCode]?.productName || '',
-                  lastSale: null
+                  trend: 'stable'
                 };
               }
               
-              const quantity = parseInt(detail.quantity) || 0;
-              const price = parseFloat(detail.salesPrice) || 0;
-              
               salesMap[productCode].quantity += quantity;
-              salesMap[productCode].amount += price * quantity;
+              salesMap[productCode].amount += subtotal;
               salesMap[productCode].transactions.push({
                 date: transaction.transactionDateTime,
                 quantity: quantity,
@@ -885,10 +884,13 @@ function getPlatformSalesDataComplete(days = 30) {
           }
           
           processedTransactions++;
+        } catch (error) {
+          console.error(`거래 ${transaction.transactionId} 처리 중 오류:`, error);
+          continue;
         }
         
-        // 진행상황 표시
-        if ((i + 1) % 20 === 0) {
+        // 진행상황 표시 (10개마다)
+        if ((i + 1) % 10 === 0) {
           console.log(`  - ${i + 1}/${transactions.length} 거래 처리 완료`);
         }
       }
@@ -902,12 +904,20 @@ function getPlatformSalesDataComplete(days = 30) {
       
       page++;
       
-      // 최대 10페이지까지 (1000개 거래)
-      if (page > 10) {
-        console.log('최대 페이지 도달');
+      // 최대 5페이지까지만 처리 (500개 거래)
+      if (page > 5) {
+        console.log('최대 페이지 도달 (5페이지)');
         break;
       }
     }
+    
+    // 추세 분석
+    Object.keys(salesMap).forEach(productCode => {
+      const salesData = salesMap[productCode];
+      if (salesData.transactions.length > 0) {
+        salesData.trend = analyzeSalesTrend(salesData.transactions, days);
+      }
+    });
     
     console.log(`총 ${processedTransactions}개 거래에서 ${Object.keys(salesMap).length}개 상품의 판매 데이터 수집`);
     
@@ -927,69 +937,153 @@ function getPlatformSalesDataComplete(days = 30) {
     console.error('판매 데이터 조회 실패:', error);
     return {
       success: false,
-      error: error.toString()
+      error: error.toString(),
+      message: '판매 데이터 조회 중 오류가 발생했습니다'
     };
   }
 }
 
-// smaregiPlatformAPI.gs에 추가
-function testSimpleIntegration() {
-  console.log('=== 간소화 통합 테스트 ===');
-  
-  // 1. 재고 테스트
-  const stockData = getSmaregiStockData();
-  console.log(`재고: ${stockData.success ? '✅ ' + stockData.count + '개' : '❌ 실패'}`);
-  
-  if (stockData.success) {
-    // 재고가 있는 상품 3개 선택
-    const sampleBarcodes = Object.keys(stockData.data).slice(0, 3);
-    console.log('\n샘플 재고:');
-    sampleBarcodes.forEach(barcode => {
-      const stock = stockData.data[barcode];
-      console.log(`${barcode}: ${stock.quantity}개 (${stock.productName})`);
-    });
+// 간단한 판매 데이터 조회 함수 (개선 버전)
+function getSimpleSalesDataV2(days = 30) {
+  try {
+    console.log(`=== 최근 ${days}일 판매 데이터 조회 (간단 버전 v2) ===`);
     
-    // 2. 판매 데이터 테스트
-    console.log('\n판매 데이터 조회 중...');
-    const salesData = getBatchSalesData(sampleBarcodes, 7);
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
+      return { success: false, message: 'API 미연결' };
+    }
     
-    console.log('\n판매 데이터 결과:');
-    salesData.forEach(item => {
-      console.log(`${item.barcode}: ${item.quantity}개 판매 (일평균 ${item.avgDaily}개)`);
-    });
-  }
-}
-
-// 판매 데이터만 테스트
-function testOnlySalesData() {
-  console.log('=== 판매 데이터 직접 테스트 ===');
-  
-  // 이전 테스트에서 확인한 실제 판매된 바코드
-  const testBarcodes = ['1000027489', '1000025029'];
-  
-  console.log('1. getPlatformSalesDataComplete 테스트');
-  const completeResult = getPlatformSalesDataComplete(7);
-  
-  if (completeResult.success) {
-    console.log(`✅ ${completeResult.count}개 상품의 판매 데이터 수집`);
+    const stores = getPlatformStores();
+    if (!stores || stores.length === 0) {
+      return { success: false, message: '매장 정보 없음' };
+    }
     
-    testBarcodes.forEach(barcode => {
-      if (completeResult.data[barcode]) {
-        const data = completeResult.data[barcode];
-        console.log(`\n${barcode}: ${data.productName}`);
-        console.log(`- 판매량: ${data.quantity}개`);
-        console.log(`- 매출액: ₩${data.amount.toLocaleString()}`);
+    const storeId = stores[0].storeId;
+    
+    // 날짜 설정
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    const dateFrom = Utilities.formatDate(startDate, 'GMT+9', "yyyy-MM-dd'T'HH:mm:ss") + '+09:00';
+    const dateTo = Utilities.formatDate(endDate, 'GMT+9', "yyyy-MM-dd'T'HH:mm:ss") + '+09:00';
+    
+    console.log(`조회 기간: ${dateFrom} ~ ${dateTo}`);
+    
+    // 캐시 확인
+    const cacheKey = `sales_simple_v2_${days}_${storeId}`;
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log('캐시된 판매 데이터 사용');
+      return {
+        success: true,
+        data: cached.data,
+        count: cached.count,
+        cached: true
+      };
+    }
+    
+    // 판매 데이터 맵
+    const salesMap = {};
+    let page = 1;
+    const limit = 100;
+    let totalTransactions = 0;
+    let hasData = true;
+    
+    // 최대 3페이지 (300개 거래)까지만 조회
+    while (page <= 3 && hasData) {
+      const params = [
+        `store_id=${storeId}`,
+        `transaction_date_time-from=${encodeURIComponent(dateFrom)}`,
+        `transaction_date_time-to=${encodeURIComponent(dateTo)}`,
+        `limit=${limit}`,
+        `page=${page}`
+      ].join('&');
+      
+      const endpoint = `pos/transactions?${params}`;
+      const result = callPlatformAPI(endpoint);
+      
+      if (!result.success || !result.data || result.data.length === 0) {
+        hasData = false;
+        break;
       }
-    });
+      
+      // 각 거래에 대해 상세 정보 조회
+      for (const transaction of result.data) {
+        // 거래 ID 찾기 (Smaregi는 transactionHeadId 사용)
+        const transId = transaction.transactionHeadId || 
+                       transaction.id || 
+                       transaction.transaction_id;
+        
+        if (!transId) {
+          console.log('거래 ID를 찾을 수 없습니다:', transaction);
+          continue;
+        }
+        
+        try {
+          // 거래 상세 조회
+          const detailEndpoint = `pos/transactions/${transId}/details`;
+          const detailResult = callPlatformAPI(detailEndpoint);
+          
+          if (detailResult.success && detailResult.data) {
+            // 각 상품별 판매 데이터 집계
+            detailResult.data.forEach(detail => {
+              const productCode = detail.productCode || detail.product_code;
+              if (!productCode) return;
+              
+              if (!salesMap[productCode]) {
+                salesMap[productCode] = {
+                  productCode: productCode,
+                  productName: detail.productName || detail.product_name || '상품명 없음',
+                  quantity: 0,
+                  amount: 0,
+                  transactions: 0
+                };
+              }
+              
+              salesMap[productCode].quantity += parseInt(detail.quantity || 0);
+              salesMap[productCode].amount += parseFloat(detail.subtotal || detail.price || 0);
+              salesMap[productCode].transactions += 1;
+            });
+          }
+        } catch (error) {
+          console.error(`거래 ${transId} 상세 조회 실패:`, error);
+        }
+      }
+      
+      totalTransactions += result.data.length;
+      console.log(`페이지 ${page}: ${result.data.length}개 거래 처리`);
+      
+      if (result.data.length < limit) {
+        hasData = false;
+      }
+      
+      page++;
+    }
+    
+    console.log(`총 ${totalTransactions}개 거래에서 ${Object.keys(salesMap).length}개 상품 판매 데이터 수집`);
+    
+    // 결과 캐싱
+    const resultData = {
+      data: salesMap,
+      count: Object.keys(salesMap).length
+    };
+    
+    setCache(cacheKey, resultData, 1800); // 30분
+    
+    return {
+      success: true,
+      data: salesMap,
+      count: Object.keys(salesMap).length,
+      totalTransactions: totalTransactions
+    };
+    
+  } catch (error) {
+    console.error('간단한 판매 데이터 조회 실패:', error);
+    return {
+      success: false,
+      error: error.toString()
+    };
   }
-  
-  console.log('\n\n2. getBatchSalesData 테스트');
-  const batchResult = getBatchSalesData(testBarcodes, 7);
-  
-  batchResult.forEach(item => {
-    console.log(`\n${item.barcode}:`);
-    console.log(`- 판매량: ${item.quantity}개`);
-    console.log(`- 일평균: ${item.avgDaily}개`);
-    console.log(`- 추세: ${item.trend}`);
-  });
 }
