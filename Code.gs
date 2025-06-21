@@ -3580,29 +3580,86 @@ function resetAllBoxNumbers(orderId) {
   }
 }
 
-// ===== 개별 상품 판매 정보 조회 =====
+/**
+ * 개별 상품의 판매 데이터 조회 (웹앱에서 사용)
+ * @param {string} barcode - 상품 바코드
+ * @returns {Object} 판매 데이터
+ */
 function getProductSalesData(barcode) {
   try {
-    if (!isSmaregiAvailable()) {
+    if (!barcode) {
       return {
         success: false,
-        salesInfo: null
+        message: '바코드가 없습니다'
       };
     }
     
+    console.log(`개별 판매 데이터 조회: ${barcode}`);
+    
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
+      return {
+        success: false,
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    // 판매 정보 조회 (salesDataAPI.gs의 함수 사용)
     const salesInfo = getProductSalesInfo(barcode);
     
+    if (salesInfo) {
+      // 단기 판매량 계산을 위해 다시 조회
+      const shortSalesData = getBatchSalesData([barcode], shortPeriod)[0];
+      
+      return {
+        success: true,
+        salesInfo: {
+          barcode: barcode,
+          quantity: salesInfo.totalQty || 0,
+          avgDaily: salesInfo.avgDaily || 0,
+          trend: salesInfo.trend || 'stable',
+          lastShortDays: shortSalesData ? shortSalesData.quantity : 0,
+          shortPeriod: shortPeriod,
+          longPeriod: longPeriod
+        }
+      };
+    }
+    
+    // 데이터가 없는 경우 직접 조회
+    const salesData = getBatchSalesData([barcode], longPeriod)[0];
+    if (salesData) {
+      const shortSalesData = getBatchSalesData([barcode], shortPeriod)[0];
+      
+      return {
+        success: true,
+        salesInfo: {
+          barcode: barcode,
+          quantity: salesData.quantity || 0,
+          avgDaily: salesData.avgDaily || 0,
+          trend: salesData.trend || 'stable',
+          lastShortDays: shortSalesData ? shortSalesData.quantity : 0,
+          shortPeriod: shortPeriod,
+          longPeriod: longPeriod
+        }
+      };
+    }
+    
     return {
-      success: true,
-      barcode: barcode,
-      salesInfo: salesInfo
+      success: false,
+      message: '판매 데이터를 찾을 수 없습니다'
     };
     
   } catch (error) {
-    console.error('판매 정보 조회 실패:', error);
+    console.error('판매 데이터 조회 실패:', error);
     return {
       success: false,
-      salesInfo: null
+      message: error.toString()
     };
   }
 }
