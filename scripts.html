@@ -5155,27 +5155,22 @@ function updateBulkEditButton() {
  }
 }
 
-
-// updateExportButtonStatus 함수 수정
 function updateExportButtonStatus() {
-  // showExportModal 버튼 찾기 (HTML 구조에 맞게)
-  const exportButtons = document.querySelectorAll('[onclick*="showExportModal"]');
+  const exportBtn = document.getElementById('export-csv-btn');
   
-  if (exportButtons.length === 0) {
-    console.log('Export modal button not found in DOM');
+  // 버튼이 없으면 그냥 리턴 (오류 방지)
+  if (!exportBtn) {
+    console.log('export-csv-btn not found in DOM');
     return;
   }
   
-  // 모든 export 관련 버튼 처리
-  exportButtons.forEach(exportBtn => {
-    if (!AppState.currentOrderInfo || AppState.orderItems.length === 0) {
-      exportBtn.disabled = true;
-      return;
-    }
-    
-    const hasConfirmed = AppState.orderItems.some(item => item.status === '확정');
-    exportBtn.disabled = !hasConfirmed;
-  });
+  if (!AppState.currentOrderInfo || AppState.orderItems.length === 0) {
+    exportBtn.disabled = true;
+    return;
+  }
+  
+  const hasConfirmed = AppState.orderItems.some(item => item.status === '확정');
+  exportBtn.disabled = !hasConfirmed;
 }
 
 // ===== 25. 대시보드 기능 =====
