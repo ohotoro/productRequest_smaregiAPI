@@ -250,13 +250,10 @@ function getPlatformStores() {
 }
 
 // testPlatformConnection 함수 - 연결 테스트
+// Platform API 연결 테스트
 function testPlatformConnection() {
   try {
-    console.log('=== Platform API 연결 테스트 ===');
-    
-    // 토큰 발급 테스트
     const tokenData = getPlatformAccessToken();
-    
     if (!tokenData) {
       return {
         success: false,
@@ -264,30 +261,18 @@ function testPlatformConnection() {
       };
     }
     
-    console.log('토큰 스코프:', tokenData.scope);
+    // 매장 정보로 연결 테스트
+    const stores = getPlatformStores();
     
-    // 매장 조회로 연결 확인
-    const result = callPlatformAPI('pos/stores');
-    
-    if (result.success) {
-      console.log(`✅ 연결 성공: ${result.data.length}개 매장`);
-      return {
-        success: true,
-        message: 'Platform API 연결 성공',
-        stores: result.data.length,
-        data: result.data
-      };
-    } else {
-      console.error('❌ API 호출 실패:', result.error);
-      return {
-        success: false,
-        message: `API 호출 실패: ${result.statusCode}`,
-        error: result.error
-      };
-    }
+    return {
+      success: true,
+      message: 'Platform API 연결 성공',
+      stores: stores.length,
+      data: stores
+    };
     
   } catch (error) {
-    console.error('Platform API 테스트 실패:', error);
+    console.error('Platform API 연결 실패:', error);
     return {
       success: false,
       message: '연결 테스트 실패',
