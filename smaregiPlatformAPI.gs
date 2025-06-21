@@ -343,71 +343,51 @@ function getProductCodeById(productId) {
   }
 }
 
-// getPlatformStockDataOptimized 함수 완전 교체
+// getPlatformStockDataOptimized 함수 전체 교체
 function getPlatformStockDataOptimized(storeId = null) {
   try {
     console.log('=== 최적화된 재고 데이터 취득 ===');
     
-    // 1. 먼저 전체 상품 정보를 가져와서 매핑 생성
+    // 캐시 확인 (30분)
+    const cacheKey = `platform_stock_data_${storeId || 'all'}`;
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log('캐시에서 재고 데이터 반환');
+      return cached;
+    }
+    
+    const stockData = {};
+    let totalStock = 0;
+    let page = 1;
+    const limit = 100; // 한 번에 가져올 수
+    
+    // 상품 맵을 먼저 가져오기 (캐시됨)
     const productMap = getAllProductsMap();
     
-    if (Object.keys(productMap).length === 0) {
-      console.log('상품 정보가 없습니다');
-      return {
-        success: false,
-        message: '상품 정보를 가져올 수 없습니다'
-      };
-    }
-    
-    // 2. 매장 ID 가져오기
-    if (!storeId) {
-      const stores = getPlatformStores();
-      if (stores.length > 0) {
-        storeId = stores[0].storeId;
-        console.log('기본 매장 ID:', storeId);
-      } else {
-        return { success: false, message: '매장 정보를 찾을 수 없습니다' };
+    // 재고 정보 가져오기
+    while (totalStock < 700) { // 최대 700개까지만
+      let endpoint = `pos/stock?limit=${limit}&page=${page}`;
+      if (storeId) {
+        endpoint += `&store_id=${storeId}`;
       }
-    }
-    
-    // 3. productId -> productCode 역매핑 생성
-    const idToCodeMap = {};
-    Object.entries(productMap).forEach(([code, info]) => {
-      idToCodeMap[info.productId] = code;
-    });
-    
-    // 4. 재고 데이터 가져오기
-    const stockData = {};
-    let page = 1;
-    const limit = 1000;
-    let totalStock = 0;
-    
-    while (true) {
-      const endpoint = `pos/stock?store_id=${storeId}&limit=${limit}&page=${page}`;
+      
       const result = callPlatformAPI(endpoint);
       
-      if (!result.success) {
-        console.error('재고 조회 실패:', result.error);
+      if (!result.success || !result.data || result.data.length === 0) {
         break;
       }
       
-      const items = result.data;
-      if (!items || items.length === 0) {
-        break;
-      }
-      
-      // productId를 productCode로 변환하여 저장
-      items.forEach(item => {
-        const productCode = idToCodeMap[item.productId];
+      // 재고 데이터 처리
+      result.data.forEach(item => {
+        const productId = item.productId;
+        const productInfo = Object.values(productMap).find(p => p.productId === productId);
+        const productCode = productInfo ? productInfo.productCode : '';
         
         if (productCode) {
-          const productInfo = productMap[productCode];
-          
           stockData[productCode] = {
             quantity: parseInt(item.stockAmount) || 0,
             layawayQuantity: parseInt(item.layawayStockAmount) || 0,
-            availableQuantity: parseInt(item.stockAmount) - parseInt(item.layawayStockAmount),
-            productId: item.productId,
+            availableQuantity: (parseInt(item.stockAmount) || 0) - (parseInt(item.layawayStockAmount) || 0),
             productName: productInfo ? productInfo.productName : '',
             productCode: productCode,
             storeId: item.storeId,
@@ -417,26 +397,33 @@ function getPlatformStockDataOptimized(storeId = null) {
         }
       });
       
-      console.log(`페이지 ${page}: ${items.length}개 재고 처리`);
+      console.log(`페이지 ${page}: ${result.data.length}개 재고 처리`);
       
-      if (items.length < limit) {
+      // 다음 페이지 없으면 종료
+      if (result.data.length < limit) {
         break;
       }
+      
       page++;
+      
+      // API 제한 방지를 위한 짧은 대기
+      Utilities.sleep(100);
     }
     
     console.log(`총 ${totalStock}개 재고 데이터 취득 완료`);
     
-    // 캐시에 저장 (5분)
-    setCache('platform_stock_data', stockData, 300);
-    
-    return {
+    const resultData = {
       success: true,
       data: stockData,
       count: totalStock,
       storeId: storeId,
       timestamp: new Date().toISOString()
     };
+    
+    // 캐시 저장 (30분)
+    setCache(cacheKey, resultData, 1800);
+    
+    return resultData;
     
   } catch (error) {
     console.error('재고 데이터 취득 에러:', error);
@@ -447,10 +434,10 @@ function getPlatformStockDataOptimized(storeId = null) {
   }
 }
 
-// getAllProductsMap 함수 완전 교체
+// getAllProductsMap 함수 최적화
 function getAllProductsMap() {
   try {
-    // 캐시 확인
+    // 캐시 확인 (1시간)
     const cached = getCache('all_products_map');
     if (cached) {
       console.log('캐시에서 상품 맵 가져옴');
@@ -460,10 +447,10 @@ function getAllProductsMap() {
     console.log('전체 상품 정보 가져오는 중...');
     const productMap = {};
     let page = 1;
-    const limit = 1000;
+    const limit = 1000; // 한 번에 많이 가져오기
     let totalProducts = 0;
     
-    while (true) {
+    while (totalProducts < 1000) { // 최대 1000개 제한
       const result = callPlatformAPI(`pos/products?limit=${limit}&page=${page}`);
       
       if (!result.success || !result.data || result.data.length === 0) {
@@ -471,7 +458,6 @@ function getAllProductsMap() {
       }
       
       result.data.forEach(product => {
-        // productCode(바코드)를 키로 사용
         productMap[product.productCode] = {
           productId: product.productId,
           productName: product.productName,
@@ -485,7 +471,11 @@ function getAllProductsMap() {
       if (result.data.length < limit) {
         break;
       }
+      
       page++;
+      
+      // API 제한 방지
+      Utilities.sleep(100);
     }
     
     console.log(`총 ${totalProducts}개 상품 매핑 생성 완료`);
@@ -498,6 +488,25 @@ function getAllProductsMap() {
   } catch (error) {
     console.error('상품 맵 생성 에러:', error);
     return {};
+  }
+}
+
+// 캐시 무효화 함수 추가
+function invalidatePlatformCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.removeAll(['all_products_map', 'platform_stock_data_all']);
+    console.log('Platform API 캐시 무효화 완료');
+    return {
+      success: true,
+      message: '캐시가 초기화되었습니다.'
+    };
+  } catch (error) {
+    console.error('캐시 무효화 실패:', error);
+    return {
+      success: false,
+      error: error.toString()
+    };
   }
 }
 
