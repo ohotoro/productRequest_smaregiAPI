@@ -199,20 +199,46 @@ function getSmaregiAPIUsage() {
  * @returns {boolean} 연결 가능 여부
  */
 function isSmaregiAvailable() {
-  const cacheKey = 'smaregi_available';
-  const cached = getCache(cacheKey);
-  
-  if (cached !== null) {
-    return cached;
+  try {
+    const cacheKey = 'smaregi_available';
+    const cached = getCache(cacheKey);
+    
+    if (cached !== null) {
+      return cached;
+    }
+    
+    let isAvailable = false;
+    
+    // Platform API 확인
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // 토큰 확인
+        const token = getPlatformAccessToken();
+        isAvailable = !!(token && token.access_token);
+        
+        // 캐시 저장 (5분)
+        setCache(cacheKey, isAvailable, CACHE_DURATION.SHORT);
+        
+        console.log(`Smaregi API 사용 가능 (Platform): ${isAvailable}`);
+        return isAvailable;
+      }
+    }
+    
+    // Legacy API 확인 (fallback)
+    const result = testSmaregiConnection();
+    isAvailable = result.success;
+    
+    // 연결 상태 캐시 (5분)
+    setCache(cacheKey, isAvailable, CACHE_DURATION.SHORT);
+    
+    console.log(`Smaregi API 사용 가능 (Legacy): ${isAvailable}`);
+    return isAvailable;
+    
+  } catch (error) {
+    console.error('Smaregi 가용성 확인 실패:', error);
+    return false;
   }
-  
-  const result = testSmaregiConnection();
-  const isAvailable = result.success;
-  
-  // 연결 상태 캐시 (5분)
-  setCache(cacheKey, isAvailable, CACHE_DURATION.SHORT);
-  
-  return isAvailable;
 }
 
 /**
