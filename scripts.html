@@ -2855,34 +2855,101 @@ function createSalesBadge(barcode, salesData) {
   </span>`;
 }
 
+// 판매 툴팁 모달 관련 전역 변수
+let currentSalesTooltipModal = null;
+
+// 판매 툴팁 초기화 함수
 function initializeSalesTooltips() {
+  // 기존 이벤트 리스너 제거
   document.querySelectorAll('.badge-sales').forEach(badge => {
-    // 마우스 오버 시 툴팁 표시
-    badge.addEventListener('mouseenter', function(e) {
-      const tooltip = this.querySelector('.sales-tooltip');
-      if (tooltip) {
-        tooltip.style.display = 'block';
-        
-        // 툴팁 위치 조정
-        const rect = this.getBoundingClientRect();
-        const tooltipRect = tooltip.getBoundingClientRect();
-        
-        // 화면 밖으로 나가지 않도록 조정
-        if (rect.top - tooltipRect.height < 10) {
-          tooltip.style.bottom = 'auto';
-          tooltip.style.top = '100%';
-        }
-      }
-    });
-    
-    // 마우스 나가면 툴팁 숨기기
-    badge.addEventListener('mouseleave', function() {
-      const tooltip = this.querySelector('.sales-tooltip');
-      if (tooltip) {
-        tooltip.style.display = 'none';
-      }
-    });
+    badge.replaceWith(badge.cloneNode(true));
   });
+  
+  // 새로운 이벤트 리스너 추가
+  document.querySelectorAll('.badge-sales').forEach(badge => {
+    badge.addEventListener('mouseenter', showSalesTooltipModal);
+    badge.addEventListener('mouseleave', hideSalesTooltipModal);
+  });
+}
+
+// 판매 툴팁 모달 표시
+function showSalesTooltipModal(e) {
+  // 기존 툴팁 제거
+  hideSalesTooltipModal();
+  
+  const badge = e.currentTarget;
+  const barcode = badge.dataset.barcode;
+  const total = badge.dataset.total || '0';
+  const avg = badge.dataset.avg || '0';
+  const trend = badge.dataset.trend || 'stable';
+  
+  // 설정 가져오기
+  const settings = AppState.settings || {};
+  const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+  
+  // 트렌드 이모지와 텍스트
+  const trendEmoji = trend === 'up' ? '📈' : trend === 'down' ? '📉' : '➡️';
+  const trendText = trend === 'up' ? '상승' : trend === 'down' ? '하락' : '유지';
+  
+  // 모달 생성
+  const modal = document.createElement('div');
+  modal.className = 'sales-tooltip-modal';
+  modal.innerHTML = `
+    <div class="tooltip-header">판매 정보 (${longPeriod}일)</div>
+    <div class="tooltip-content">
+      <div class="tooltip-row">
+        <span class="tooltip-label">총 판매량:</span>
+        <span class="tooltip-value">${total}개</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">일평균:</span>
+        <span class="tooltip-value">${parseFloat(avg).toFixed(1)}개</span>
+      </div>
+      <div class="tooltip-row">
+        <span class="tooltip-label">추세:</span>
+        <span class="tooltip-value">${trendEmoji} ${trendText}</span>
+      </div>
+    </div>
+  `;
+  
+  // body에 추가
+  document.body.appendChild(modal);
+  currentSalesTooltipModal = modal;
+  
+  // 위치 계산
+  const rect = badge.getBoundingClientRect();
+  const modalRect = modal.getBoundingClientRect();
+  
+  let top = rect.top - modalRect.height - 10;
+  let left = rect.left + (rect.width / 2) - (modalRect.width / 2);
+  
+  // 화면 상단 벗어남 체크
+  if (top < 10) {
+    top = rect.bottom + 10;
+  }
+  
+  // 화면 좌우 벗어남 체크
+  if (left < 10) {
+    left = 10;
+  } else if (left + modalRect.width > window.innerWidth - 10) {
+    left = window.innerWidth - modalRect.width - 10;
+  }
+  
+  modal.style.top = top + 'px';
+  modal.style.left = left + 'px';
+  
+  // 페이드인 효과
+  requestAnimationFrame(() => {
+    modal.style.opacity = '0.95';
+  });
+}
+
+// 판매 툴팁 모달 숨기기
+function hideSalesTooltipModal() {
+  if (currentSalesTooltipModal) {
+    currentSalesTooltipModal.remove();
+    currentSalesTooltipModal = null;
+  }
 }
 
 function checkSalesDataStatus() {
@@ -3054,13 +3121,12 @@ function loadSearchResultsStock(results) {
   initializeSalesInfoHandlers();
 }
 
-
 // 개별 재고 배지 업데이트
 function updateStockBadge(barcode, stockInfo) {
   const badge = document.querySelector(`.stock-badge[data-barcode="${barcode}"]`);
   if (!badge) return;
   
-  badge.classList.remove('loading');
+  badge.classList.remove('loading', 'no-data', 'out-of-stock', 'low-stock', 'in-stock');
   
   const stock = stockInfo.availableStock || stockInfo.stock || 0;
   const stockText = badge.querySelector('.stock-text');
