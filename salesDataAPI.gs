@@ -420,3 +420,200 @@ function calculateSalesSummary(salesData) {
   
   return { quantity, amount, transactions };
 }
+
+// ===== salesDataAPI.gs에 추가할 함수 =====
+
+/**
+ * 전체 상품의 판매 데이터 로드 (초기화용)
+ * @returns {Object} 전체 판매 데이터
+ */
+function loadAllProductsSalesData() {
+  try {
+    console.log('=== 전체 상품 판매 데이터 로드 시작 ===');
+    
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
+      return {
+        success: false,
+        data: {},
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 캐시 확인
+    const cacheKey = 'ALL_PRODUCTS_SALES_DATA';
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log('캐시된 판매 데이터 사용');
+      return {
+        success: true,
+        data: cached.data,
+        timestamp: cached.timestamp,
+        cached: true
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    // 날짜 범위 설정
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - longPeriod);
+    
+    // 전체 상품 바코드 가져오기
+    const allProducts = getProductBarcodes();
+    console.log(`총 ${allProducts.length}개 상품 판매 데이터 조회`);
+    
+    // 판매 데이터 수집
+    const salesDataMap = {};
+    
+    // 배치 처리 (100개씩)
+    const batchSize = 100;
+    for (let i = 0; i < allProducts.length; i += batchSize) {
+      const batch = allProducts.slice(i, i + batchSize);
+      
+      try {
+        // getBatchSalesData 함수 활용
+        const batchResults = getBatchSalesData(batch, longPeriod);
+        
+        // 결과를 맵에 저장
+        batchResults.forEach(result => {
+          if (result.barcode) {
+            salesDataMap[result.barcode] = {
+              quantity: result.quantity || 0,
+              avgDaily: result.avgDaily || 0,
+              trend: result.trend || 'stable',
+              count: result.count || 0,
+              lastUpdate: new Date().toISOString()
+            };
+          }
+        });
+        
+        // 진행상황 로그
+        console.log(`판매 데이터 로드: ${Math.min(i + batchSize, allProducts.length)}/${allProducts.length}`);
+        
+        // API 호출 제한 대응
+        if (i + batchSize < allProducts.length) {
+          Utilities.sleep(200); // 0.2초 대기
+        }
+        
+      } catch (error) {
+        console.error(`배치 ${i}-${i+batchSize} 처리 실패:`, error);
+        // 실패한 배치는 0으로 초기화
+        batch.forEach(barcode => {
+          salesDataMap[barcode] = {
+            quantity: 0,
+            avgDaily: 0,
+            trend: 'unknown',
+            count: 0,
+            lastUpdate: new Date().toISOString(),
+            error: true
+          };
+        });
+      }
+    }
+    
+    // 결과 캐싱 (2시간)
+    const result = {
+      data: salesDataMap,
+      timestamp: new Date().toISOString(),
+      totalProducts: allProducts.length,
+      period: longPeriod
+    };
+    
+    setCache(cacheKey, result, CACHE_DURATION.LONG * 2);
+    
+    console.log(`판매 데이터 로드 완료: ${Object.keys(salesDataMap).length}개`);
+    
+    return {
+      success: true,
+      data: salesDataMap,
+      timestamp: result.timestamp,
+      totalProducts: result.totalProducts,
+      cached: false
+    };
+    
+  } catch (error) {
+    console.error('전체 판매 데이터 로드 실패:', error);
+    return {
+      success: false,
+      data: {},
+      error: error.toString()
+    };
+  }
+}
+
+/**
+ * 전체 상품 바코드 목록 가져오기
+ * @private
+ */
+function getProductBarcodes() {
+  try {
+    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
+    
+    if (!sheet) {
+      throw new Error('상품 시트를 찾을 수 없습니다');
+    }
+    
+    const lastRow = sheet.getLastRow();
+    const barcodeColumn = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    
+    const barcodes = [];
+    for (let i = 0; i < barcodeColumn.length; i++) {
+      if (barcodeColumn[i][0]) {
+        barcodes.push(String(barcodeColumn[i][0]));
+      }
+    }
+    
+    return barcodes;
+    
+  } catch (error) {
+    console.error('바코드 목록 가져오기 실패:', error);
+    return [];
+  }
+}
+
+/**
+ * 개별 상품 판매 정보 조회 (간단 버전)
+ * @param {string} barcode - 바코드
+ * @returns {Object} 판매 정보
+ */
+function getProductSalesInfo(barcode) {
+  try {
+    // 먼저 전체 캐시에서 확인
+    const allDataCache = getCache('ALL_PRODUCTS_SALES_DATA');
+    if (allDataCache && allDataCache.data && allDataCache.data[barcode]) {
+      return allDataCache.data[barcode];
+    }
+    
+    // 개별 조회
+    const settings = getSettings();
+    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    const salesData = getBatchSalesData([barcode], longPeriod)[0];
+    
+    if (salesData) {
+      // 단기 판매량 계산
+      const recentSales = getBatchSalesData([barcode], shortPeriod)[0];
+      
+      return {
+        totalQty: salesData.quantity || 0,
+        avgDaily: salesData.avgDaily || 0,
+        trend: salesData.trend || 'stable',
+        lastShortDays: recentSales ? recentSales.quantity : 0,
+        lastUpdate: new Date().toISOString()
+      };
+    }
+    
+    return null;
+    
+  } catch (error) {
+    console.error('개별 판매 정보 조회 실패:', error);
+    return null;
+  }
+}
