@@ -1,6 +1,3 @@
-// ===== 전역 설정 Code.gs ===== 
-
-
 // ===== 웹앱 진입점 =====
 function doGet() {
   const template = HtmlService.createTemplateFromFile('index');
@@ -3576,6 +3573,117 @@ function resetAllBoxNumbers(orderId) {
     return {
       success: false,
       message: error.toString()
+    };
+  }
+}
+
+// ===== 전체 판매 데이터 로드 함수 =====
+function loadAllProductsSalesData() {
+  try {
+    console.log('=== 전체 상품 판매 데이터 로드 시작 ===');
+    
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
+      return {
+        success: false,
+        data: {},
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    // 전체 상품 바코드 가져오기
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상품 데이터베이스');
+    if (!sheet) {
+      throw new Error('상품 시트를 찾을 수 없습니다');
+    }
+    
+    const lastRow = sheet.getLastRow();
+    const barcodeColumn = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    
+    const salesDataMap = {};
+    const barcodes = [];
+    
+    // 바코드 수집
+    for (let i = 0; i < barcodeColumn.length; i++) {
+      if (barcodeColumn[i][0]) {
+        barcodes.push(String(barcodeColumn[i][0]));
+      }
+    }
+    
+    console.log(`총 ${barcodes.length}개 상품 판매 데이터 조회`);
+    
+    // 배치 처리 (100개씩)
+    const batchSize = 100;
+    for (let i = 0; i < barcodes.length; i += batchSize) {
+      const batch = barcodes.slice(i, i + batchSize);
+      
+      try {
+        // getBatchSalesData 함수가 있다면 사용
+        if (typeof getBatchSalesData === 'function') {
+          const batchResults = getBatchSalesData(batch, longPeriod);
+          
+          batchResults.forEach(result => {
+            if (result.barcode) {
+              salesDataMap[result.barcode] = {
+                quantity: result.quantity || 0,
+                avgDaily: result.avgDaily || 0,
+                trend: result.trend || 'stable',
+                count: result.count || 0,
+                lastUpdate: new Date().toISOString()
+              };
+            }
+          });
+        } else {
+          // getBatchSalesData가 없으면 기본값 설정
+          batch.forEach(barcode => {
+            salesDataMap[barcode] = {
+              quantity: 0,
+              avgDaily: 0,
+              trend: 'unknown',
+              count: 0,
+              lastUpdate: new Date().toISOString()
+            };
+          });
+        }
+        
+        console.log(`판매 데이터 로드: ${Math.min(i + batchSize, barcodes.length)}/${barcodes.length}`);
+        
+      } catch (error) {
+        console.error(`배치 ${i}-${i+batchSize} 처리 실패:`, error);
+        batch.forEach(barcode => {
+          salesDataMap[barcode] = {
+            quantity: 0,
+            avgDaily: 0,
+            trend: 'unknown',
+            count: 0,
+            lastUpdate: new Date().toISOString(),
+            error: true
+          };
+        });
+      }
+    }
+    
+    console.log(`판매 데이터 로드 완료: ${Object.keys(salesDataMap).length}개`);
+    
+    return {
+      success: true,
+      data: salesDataMap,
+      timestamp: new Date().toISOString(),
+      totalProducts: barcodes.length,
+      cached: false
+    };
+    
+  } catch (error) {
+    console.error('전체 판매 데이터 로드 실패:', error);
+    return {
+      success: false,
+      data: {},
+      error: error.toString()
     };
   }
 }
