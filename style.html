@@ -1640,6 +1640,10 @@ button .loading-spinner-small {
     transition: all .3s ease
 }
 
+.issue-indicator:hover {
+  transform: scale(1.2);
+}
+
 .save-indicator.pending {
     background: rgba(255, 193, 7, .9);
     color: #000
@@ -4066,8 +4070,15 @@ order-bottom: 1px solid #e9ecef;
 }
 
 .stock-badge.loading {
-    background: #f5f5f5;
-    color: #999;
+  background: #f5f5f5;
+  color: #666;
+  border-color: #e0e0e0;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.stock-badge.loading .stock-icon {
+  animation: spin 1s linear infinite;
+  font-size: 11px;
 }
 
 .stock-badge.loading .stock-text::after {
@@ -7553,12 +7564,20 @@ body.sticky-footer-active {
 
 /* 판매 배지 로딩 상태 */
 .badge-sales.sales-loading {
-    background: #f5f5f5;
-    color: #999;
+  background: #f5f5f5;
+  color: #666;
+  border-color: #e0e0e0;
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 .badge-sales.sales-loading .sales-icon {
-    animation: spin 1s linear infinite; font-size:10px;
+  animation: spin 1s linear infinite;
+  font-size: 11px;
+}
+
+.badge-sales.sales-loading .sales-text {
+  font-style: italic;
+  opacity: 0.8;
 }
 
 @keyframes spin {
