@@ -101,79 +101,72 @@ function getCurrentConfig() {
   };
 }
 
-// getPlatformAccessToken 함수 - 토큰 발급
+// getPlatformAccessToken 함수 수정
 function getPlatformAccessToken() {
+  const cache = CacheService.getScriptCache();
+  const cachedToken = cache.get('platform_access_token');
+  
+  if (cachedToken) {
+    console.log('캐시된 토큰 사용');
+    return cachedToken;
+  }
+  
   try {
-    console.log('=== プラットフォームAPI アクセストークン取得 ===');
-    
     const config = getCurrentConfig();
-    console.log(`環境: ${config.ENVIRONMENT}`);
     
-    // CLIENT_ID/SECRET チェック
     if (!config.CLIENT_ID || !config.CLIENT_SECRET) {
-      console.error('CLIENT_ID または CLIENT_SECRET が設定されていません');
+      console.error('Platform API 자격증명이 설정되지 않았습니다');
       return null;
     }
     
-    // キャッシュ確認
-    const cached = getCache('platform_access_token');
-    if (cached && cached.expires_at > new Date().getTime()) {
-      console.log('キャッシュされたトークンを使用');
-      return cached;
-    }
+    console.log('새 토큰 발급 시도');
     
-    const url = `${config.TOKEN_URL}${config.CONTRACT_ID}/token`;
-    
-    // Basic Authentication 생성
-    const credentials = Utilities.base64Encode(`${config.CLIENT_ID}:${config.CLIENT_SECRET}`);
-    
-    // 스코프 포함
-    const formData = {
+    const tokenUrl = 'https://id.smaregi.com/token';
+    const payload = {
       'grant_type': 'client_credentials',
-      'scope': config.SCOPES
+      'client_id': config.CLIENT_ID,
+      'client_secret': config.CLIENT_SECRET,
+      'scope': config.SCOPES // 판매 데이터 권한 추가
     };
-    
-    const payload = Object.keys(formData)
-      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(formData[key])}`)
-      .join('&');
     
     const options = {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      payload: payload,
-      muteHttpExceptions: true
+      'method': 'post',
+      'contentType': 'application/x-www-form-urlencoded',
+      'payload': Object.keys(payload).map(key => 
+        `${encodeURIComponent(key)}=${encodeURIComponent(payload[key])}`
+      ).join('&'),
+      'muteHttpExceptions': true
     };
     
-    console.log('토큰 요청 URL:', url);
-    
-    const response = UrlFetchApp.fetch(url, options);
-    const statusCode = response.getResponseCode();
+    const response = UrlFetchApp.fetch(tokenUrl, options);
+    const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
     
-    console.log('応답 상태:', statusCode);
+    console.log(`토큰 응답 코드: ${responseCode}`);
     
-    if (statusCode === 200) {
-      const tokenData = JSON.parse(responseText);
+    if (responseCode !== 200) {
+      console.error('토큰 발급 실패:', responseText);
+      return null;
+    }
+    
+    const result = JSON.parse(responseText);
+    
+    if (result.access_token) {
+      // 토큰 캐시 (만료 시간 고려)
+      const expiresIn = result.expires_in || 3600;
+      const cacheTime = Math.min(expiresIn - 60, 21600); // 최대 6시간
       
-      // 有効期限を計算（通常1時間）
-      tokenData.expires_at = new Date().getTime() + (tokenData.expires_in * 1000) - 60000;
+      cache.put('platform_access_token', result.access_token, cacheTime);
+      console.log(`토큰 발급 성공, ${cacheTime}초 동안 캐시`);
       
-      // キャッシュ保存
-      setCache('platform_access_token', tokenData, tokenData.expires_in - 60);
-      
-      console.log('アクセストークン取得成功');
-      return tokenData;
-      
+      return result.access_token;
     } else {
-      console.error('トークン取得失敗:', responseText);
+      console.error('토큰이 응답에 없음:', result);
       return null;
     }
     
   } catch (error) {
-    console.error('アクセストークン取得エラー:', error);
+    console.error('Platform API 토큰 취득 실패:', error);
     return null;
   }
 }
