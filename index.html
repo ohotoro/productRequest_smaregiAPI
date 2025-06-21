@@ -782,6 +782,21 @@
                             단기 기간 동안의 판매량을 기준으로 아이콘 색상이 표시됩니다.
                         </p>
                     </div>
+
+                                        <!-- 판매 데이터 관리 -->
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>판매 데이터 관리</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button class="refresh-sales-btn" onclick="refreshSalesData()">
+                                <span class="icon">🔄</span>
+                                <span>판매 데이터 새로고침</span>
+                            </button>
+                            <span class="sales-data-status" id="sales-data-status"></span>
+                        </div>
+                        <p class="field-hint">
+                            판매 데이터는 웹앱 시작 시 자동으로 로드되며, 2시간마다 갱신됩니다.
+                        </p>
+                    </div>
                 </div>
 
                 <div class="settings-section">
