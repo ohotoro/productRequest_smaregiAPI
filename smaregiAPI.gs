@@ -542,3 +542,25 @@ function getProductSalesInfo(barcode) {
     };
   }
 }
+
+// isSmaregiAvailable 함수 추가 또는 수정
+function isSmaregiAvailable() {
+  try {
+    // Platform API 사용 가능 확인
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // 토큰이 있는지만 확인
+        const token = getPlatformAccessToken();
+        return token && token.access_token ? true : false;
+      }
+    }
+    
+    return false;
+    
+  } catch (error) {
+    console.error('Smaregi 가용성 확인 실패:', error);
+    return false;
+  }
+}
+
