@@ -55,7 +55,7 @@ PLATFORM_CONFIG: {
   PROD_API_BASE_URL: 'https://api.smaregi.jp/',
   
   // 권한 스코프
-  SCOPES: 'pos.stores:read pos.products:read pos.products:write pos.stock:read pos.stock:write pos.transactions:read pos.customers:read pos.categories:read'
+  SCOPES: 'pos.stores:read pos.products:read pos.stock:read'
 }
 }; 
 
