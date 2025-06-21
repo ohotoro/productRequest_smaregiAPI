@@ -354,6 +354,13 @@ body {
     font-size: 13px
 }
 
+.search-product-main {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
 .search-item.priority-1 {
     border-left: 3px solid #4CAF50
 }
@@ -547,7 +554,7 @@ body {
 }
 
 .product-badge {
-    display: inline-block !important;
+    display: inline-block;
     padding: 3px 10px;
     font-size: 10px;
     font-weight: 600;
@@ -2891,7 +2898,7 @@ button .loading-spinner-small {
 }
 
 .settings-form {
-    max-width: 100%;
+    max-width: 600px
 }
 
 .settings-form h2 {
@@ -4457,13 +4464,6 @@ order-bottom: 1px solid #e9ecef;
     .search-product-info {
         width: 100%;
         padding-bottom: 40px
-    }
-
-    .search-product-main {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-wrap: wrap;
     }
 
     .search-product-name {
@@ -7257,9 +7257,11 @@ body.sticky-footer-active {
     0% {
         opacity: 0.6;
     }
+
     50% {
         opacity: 1;
     }
+
     100% {
         opacity: 0.6;
     }
@@ -7267,12 +7269,12 @@ body.sticky-footer-active {
 
 /* 반응형 디자인 */
 @media (max-width: 768px) {
-    
+
     .threshold-inputs {
         flex-direction: column;
         align-items: stretch;
     }
-    
+
     .threshold-input-group {
         text-align: left;
     }
@@ -7362,6 +7364,7 @@ body.sticky-footer-active {
 .badge-sales {
     position: relative;
     cursor: help;
+    width: auto;
 }
 
 /* 툴팁 스타일 */
@@ -7443,6 +7446,7 @@ body.sticky-footer-active {
         opacity: 0;
         transform: translateX(-50%) translateY(-4px);
     }
+
     to {
         opacity: 1;
         transform: translateX(-50%) translateY(-8px);
@@ -7454,7 +7458,7 @@ body.sticky-footer-active {
     .badge-sales:active .sales-tooltip {
         display: block;
     }
-    
+
     .sales-tooltip {
         position: fixed;
         bottom: auto;
@@ -7464,7 +7468,7 @@ body.sticky-footer-active {
         min-width: 200px;
         padding: 16px;
     }
-    
+
     .sales-tooltip::after {
         display: none;
     }
