@@ -434,6 +434,13 @@ function uploadSmaregiCSV(csvContent) {
  */
 function getSmaregiData() {
   try {
+    // 먼저 캐시 확인
+    const cached = getCache('smaregi_web_data');
+    if (cached) {
+      console.log('캐시에서 Smaregi 데이터 반환');
+      return cached;
+    }
+    
     const stockData = getSmaregiStockData();
     if (stockData.success) {
       // 기존 형식으로 변환
@@ -442,10 +449,15 @@ function getSmaregiData() {
         data[barcode] = info.quantity;
       });
       
-      return {
+      const result = {
         data: data,
         uploadTime: stockData.timestamp
       };
+      
+      // 캐시 저장 (10분)
+      setCache('smaregi_web_data', result, 600);
+      
+      return result;
     }
     
     return {
