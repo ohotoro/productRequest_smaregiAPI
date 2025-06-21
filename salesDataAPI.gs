@@ -457,56 +457,105 @@ function loadAllProductsSalesData() {
       };
     }
     
-    // 캐시 확인
-    const cacheKey = 'ALL_PRODUCTS_SALES_DATA';
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log('캐시된 판매 데이터 사용');
-      return {
-        success: true,
-        data: cached.data,
-        timestamp: cached.timestamp,
-        period: cached.period,
-        totalProducts: cached.totalProducts,
-        cached: true
-      };
-    }
-    
     // 설정에서 기간 가져오기
     const settings = getSettings();
+    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
     const longPeriod = parseInt(settings.salesPeriodLong) || 30;
     
-    // 전체 판매 데이터 조회 - 기존 함수 사용
+    console.log(`판매 데이터 설정 - 단기: ${shortPeriod}일, 장기: ${longPeriod}일`);
+    
+    // 캐시 키에 기간 포함
+    const cacheKey = `ALL_SALES_DATA_${shortPeriod}_${longPeriod}`;
+    const cached = getCache(cacheKey);
+    
+    if (cached && cached.timestamp) {
+      const cacheAge = (new Date() - new Date(cached.timestamp)) / 1000 / 60; // 분
+      if (cacheAge < 120) { // 2시간 이내
+        console.log('캐시된 판매 데이터 사용');
+        return {
+          success: true,
+          data: cached.data,
+          timestamp: cached.timestamp,
+          cached: true,
+          settings: {
+            shortPeriod: shortPeriod,
+            longPeriod: longPeriod
+          }
+        };
+      }
+    }
+    
+    // 전체 바코드 목록 가져오기
+    const barcodes = getProductBarcodes();
+    console.log(`총 ${barcodes.length}개 상품의 판매 데이터 조회`);
+    
+    // 판매 데이터 조회
     const salesResult = getSimpleSalesDataV2(longPeriod);
     
-    if (salesResult && salesResult.success) {
-      // 결과 캐싱 (2시간)
-      const result = {
-        data: salesResult.data || {},
-        timestamp: new Date().toISOString(),
-        totalProducts: salesResult.count || 0,
-        period: longPeriod
-      };
-      
-      setCache(cacheKey, result, CACHE_DURATION.LONG * 2);
-      
-      console.log(`판매 데이터 로드 완료: ${result.totalProducts}개 상품`);
-      
+    if (!salesResult || !salesResult.success) {
+      console.error('판매 데이터 조회 실패');
       return {
-        success: true,
-        data: result.data,
-        timestamp: result.timestamp,
-        totalProducts: result.totalProducts,
-        period: result.period,
-        cached: false
+        success: false,
+        data: {},
+        message: '판매 데이터 조회 실패'
       };
     }
     
-    console.log('판매 데이터 조회 실패:', salesResult);
+    // 단기 판매 데이터도 조회
+    const shortSalesResult = getSimpleSalesDataV2(shortPeriod);
+    
+    // 데이터 병합 및 가공
+    const result = {};
+    
+    barcodes.forEach(barcode => {
+      const longData = salesResult.data[barcode] || { quantity: 0, amount: 0 };
+      const shortData = shortSalesResult?.data?.[barcode] || { quantity: 0, amount: 0 };
+      
+      // 추세 계산
+      let trend = 'stable';
+      const avgLong = longData.quantity / longPeriod;
+      const avgShort = shortData.quantity / shortPeriod;
+      
+      if (avgShort > avgLong * 1.2) {
+        trend = 'up';
+      } else if (avgShort < avgLong * 0.8) {
+        trend = 'down';
+      }
+      
+      result[barcode] = {
+        lastShortDays: shortData.quantity,
+        lastLongDays: longData.quantity,
+        dailyAverage: parseFloat((longData.quantity / longPeriod).toFixed(1)),
+        trend: trend,
+        amount: longData.amount,
+        shortPeriod: shortPeriod,
+        longPeriod: longPeriod
+      };
+    });
+    
+    // 결과 캐싱
+    const cacheData = {
+      data: result,
+      timestamp: new Date().toISOString(),
+      settings: {
+        shortPeriod: shortPeriod,
+        longPeriod: longPeriod
+      }
+    };
+    
+    setCache(cacheKey, cacheData, 7200); // 2시간 캐시
+    
+    console.log(`판매 데이터 로드 완료: ${Object.keys(result).length}개 상품`);
+    
     return {
-      success: false,
-      data: {},
-      message: salesResult?.message || '판매 데이터 조회 실패'
+      success: true,
+      data: result,
+      timestamp: cacheData.timestamp,
+      cached: false,
+      settings: {
+        shortPeriod: shortPeriod,
+        longPeriod: longPeriod
+      }
     };
     
   } catch (error) {
