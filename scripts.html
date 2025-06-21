@@ -504,6 +504,7 @@ const cache = new CacheManager();
 const smartRetry = new SmartRetry();
 
 // ===== 7. 초기화 =====
+// 초기화 함수 전체 교체
 document.addEventListener('DOMContentLoaded', async function() {
   console.log('=== 앱 초기화 시작 (최적화) ===');
   const startTime = performance.now();
@@ -530,31 +531,32 @@ document.addEventListener('DOMContentLoaded', async function() {
     setupEventListeners();
     await loadVoiceSettings();
     
-    // 2단계: 최소 필수 데이터만 로드
-    updateLoadingMessage('필수 데이터 로드 중...');
+    // 2단계: 모든 데이터 병렬 로드
+    updateLoadingMessage('데이터 로드 중...');
     
-    // 현재 주문 확인 (비동기)
+    const dataPromises = [];
+    
+    // 현재 주문 확인
     const orderPromise = checkCurrentOrderAsync().then(orderInfo => {
       if (orderInfo) {
         AppState.currentOrderInfo = orderInfo;
         updateOrderStatus();
         enableOrderFeatures();
+        
+        // 발주 항목 로드 추가
+        return loadOrderItemsFromSheetAsync();
       }
-      return orderInfo;
+      return null;
     });
     
-    // 초기 상품 데이터 (캐시 우선)
-    const productsPromise = loadInitialProductsFromCache();
-    
-    // 기본 카테고리 규칙
-    const categoryPromise = loadCategoryRulesAsync().catch(() => ({}));
-    
-    // 병렬 실행
-    const [orderInfo, products] = await Promise.all([
+    dataPromises.push(
       orderPromise,
-      productsPromise,
-      categoryPromise
-    ]);
+      loadInitialProductsFromCache(),
+      loadCategoryRulesAsync().catch(() => ({}))
+    );
+    
+    // 모든 필수 데이터 로드 완료 대기
+    await Promise.all(dataPromises);
     
     // UI 초기화
     requestAnimationFrame(() => {
@@ -563,21 +565,16 @@ document.addEventListener('DOMContentLoaded', async function() {
       setupStickyFooter();
     });
     
-    // 3단계: 백그라운드에서 나머지 데이터 로드
+    // 로딩 완료
     hideLoading();
     const loadTime = (performance.now() - startTime) / 1000;
     showQuickSuccess(`초기화 완료 (${loadTime.toFixed(1)}초)`);
     
-    // 백그라운드 작업
+    // 3단계: 백그라운드에서 무거운 데이터 로드
     setTimeout(() => {
-      // Smaregi 데이터는 백그라운드에서 로드
       loadSmaregiDataInBackground();
-      // 판매 데이터도 백그라운드
       loadSalesDataInBackground();
-      // 발주 항목 로드
-      if (orderInfo) {
-        loadOrderItemsInBackground();
-      }
+      prefetchFrequentProducts();
     }, 100);
     
     // 자동 저장 시작
@@ -1195,17 +1192,18 @@ async function loadSalesDataAsync() {
   });
 }
 
+// refreshSalesData 함수 수정 - 확인 없이 바로 실행
 function refreshSalesData() {
-  if (AppState.salesDataLoaded) {
-    const lastUpdate = new Date(AppState.salesDataTimestamp);
-    const now = new Date();
-    const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
-    
-    // 2시간 이내면 새로고침 스킵
-    if (hoursSinceUpdate < 2) {
-      showQuickSuccess('판매 데이터가 이미 최신입니다.');
-      return;
-    }
+  // 이미 로딩 중이면 중복 실행 방지
+  const btn = document.querySelector('.refresh-sales-btn');
+  if (btn && btn.classList.contains('loading')) {
+    return;
+  }
+  
+  // 버튼 로딩 상태로 변경
+  if (btn) {
+    btn.classList.add('loading');
+    btn.disabled = true;
   }
   
   showLoading('판매 데이터를 새로고침하는 중...');
@@ -1214,30 +1212,58 @@ function refreshSalesData() {
     .withSuccessHandler((result) => {
       hideLoading();
       
+      if (btn) {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+      }
+      
       if (result && result.success && result.data) {
-        AppState.salesData = result.data;
+        // 데이터 구조 변환
+        const salesDataObj = {};
+        
+        if (typeof result.data === 'object' && !Array.isArray(result.data)) {
+          Object.keys(result.data).forEach(barcode => {
+            const item = result.data[barcode];
+            salesDataObj[barcode] = {
+              quantity: item.quantity || 0,
+              avgDaily: item.quantity ? (item.quantity / (result.period || 30)) : 0,
+              amount: item.amount || 0,
+              trend: item.trend || 'stable',
+              transactions: item.transactions || []
+            };
+          });
+        }
+        
+        AppState.salesData = salesDataObj;
         AppState.salesDataLoaded = true;
         AppState.salesDataTimestamp = result.timestamp;
+        AppState.salesDataPeriod = result.period || 30;
         
-        showQuickSuccess('판매 데이터가 업데이트되었습니다.');
+        showQuickSuccess(`판매 데이터가 업데이트되었습니다. (${Object.keys(salesDataObj).length}개 상품)`);
+        
+        // UI 업데이트
+        updateSalesDataStatus();
         
         // 현재 표시된 검색 결과 업데이트
         const searchResults = document.getElementById('search-results');
         if (searchResults && searchResults.style.display !== 'none') {
           const currentQuery = document.getElementById('search-input').value;
           if (currentQuery) {
-            performSearch(); // searchProducts() 대신 performSearch()
+            performSearch();
           }
         }
-        
-        // 설정 탭의 상태 업데이트
-        updateSalesDataStatus();
       } else {
         showError('판매 데이터 새로고침에 실패했습니다.');
       }
     })
     .withFailureHandler((error) => {
       hideLoading();
+      
+      if (btn) {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+      }
+      
       showError('판매 데이터 새로고침 중 오류가 발생했습니다.');
     })
     .loadAllProductsSalesData();
@@ -2844,31 +2870,46 @@ function createSalesBadge(barcode, salesData) {
   </span>`;
 }
 
+// initializeSalesTooltips 함수 수정
 function initializeSalesTooltips() {
   document.querySelectorAll('.badge-sales').forEach(badge => {
-    // 마우스 오버 시 툴팁 표시
     badge.addEventListener('mouseenter', function(e) {
       const tooltip = this.querySelector('.sales-tooltip');
       if (tooltip) {
         tooltip.style.display = 'block';
         
         // 툴팁 위치 조정
-        const rect = this.getBoundingClientRect();
-        const tooltipRect = tooltip.getBoundingClientRect();
-        
-        // 화면 밖으로 나가지 않도록 조정
-        if (rect.top - tooltipRect.height < 10) {
-          tooltip.style.bottom = 'auto';
-          tooltip.style.top = '100%';
-        }
+        setTimeout(() => {
+          const rect = this.getBoundingClientRect();
+          const tooltipRect = tooltip.getBoundingClientRect();
+          
+          // 화면 상단으로 벗어나는 경우
+          if (tooltipRect.top < 10) {
+            tooltip.classList.add('tooltip-top');
+          } else {
+            tooltip.classList.remove('tooltip-top');
+          }
+          
+          // 화면 좌우로 벗어나는 경우
+          if (tooltipRect.left < 10) {
+            tooltip.style.left = '10px';
+            tooltip.style.transform = 'translateX(0) translateY(-8px)';
+          } else if (tooltipRect.right > window.innerWidth - 10) {
+            tooltip.style.left = 'auto';
+            tooltip.style.right = '10px';
+            tooltip.style.transform = 'translateX(0) translateY(-8px)';
+          }
+        }, 10);
       }
     });
     
-    // 마우스 나가면 툴팁 숨기기
     badge.addEventListener('mouseleave', function() {
       const tooltip = this.querySelector('.sales-tooltip');
       if (tooltip) {
         tooltip.style.display = 'none';
+        tooltip.style.left = '50%';
+        tooltip.style.right = 'auto';
+        tooltip.style.transform = 'translateX(-50%) translateY(-8px)';
       }
     });
   });
@@ -5364,22 +5405,35 @@ function updateBulkEditButton() {
  }
 }
 
+// updateExportPreview 함수 내부 수정
 function updateExportButtonStatus() {
   const exportBtn = document.getElementById('export-csv-btn');
-  
-  // 버튼이 없으면 그냥 리턴 (오류 방지)
   if (!exportBtn) {
-    console.log('export-csv-btn not found in DOM');
+    console.log('export-csv-btn이 DOM에 없음 (정상)');
     return;
   }
   
-  if (!AppState.currentOrderInfo || AppState.orderItems.length === 0) {
-    exportBtn.disabled = true;
-    return;
-  }
+  const hasItems = AppState.orderItems && AppState.orderItems.length > 0;
+  const notAllExported = AppState.orderItems.some(item => !item.exportedAt);
   
-  const hasConfirmed = AppState.orderItems.some(item => item.status === '확정');
-  exportBtn.disabled = !hasConfirmed;
+  exportBtn.disabled = !hasItems || !notAllExported;
+  
+  if (!hasItems) {
+    exportBtn.title = '발주 목록이 비어있습니다';
+  } else if (!notAllExported) {
+    exportBtn.title = '모든 항목이 이미 내보내기되었습니다';
+  } else {
+    exportBtn.title = 'CSV 파일로 내보내기';
+  }
+}
+
+// 모든 export-csv-btn 참조 부분에 존재 확인 추가
+function checkExportButton() {
+  const btn = document.getElementById('export-csv-btn');
+  if (btn) {
+    // 버튼이 있을 때만 실행
+    updateExportButtonStatus();
+  }
 }
 
 // ===== 25. 대시보드 기능 =====
