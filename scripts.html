@@ -665,16 +665,16 @@ function getFrequentSearches() {
   }
 }
 
-// 자주 검색하는 상품 프리페치
+// 1. prefetchFrequentProducts 함수 수정 (null 체크 추가)
 function prefetchFrequentProducts() {
   const frequent = getFrequentSearches();
-  if (frequent.length === 0) return;
+  if (!frequent || frequent.length === 0) return;
   
   // 상위 10개 상품만 프리페치
   const toPrefetch = frequent
     .slice(0, 10)
     .map(f => f.barcode)
-    .filter(barcode => !cache.get('product', barcode));
+    .filter(barcode => barcode && !cache.get('product', barcode));
   
   if (toPrefetch.length > 0) {
     console.log(`프리페치: ${toPrefetch.length}개 상품`);
@@ -683,9 +683,12 @@ function prefetchFrequentProducts() {
     setTimeout(() => {
       google.script.run
         .withSuccessHandler((products) => {
-          if (products && Array.isArray(products)) {
+          // null 체크 추가
+          if (products && Array.isArray(products) && products.length > 0) {
             products.forEach(product => {
-              cache.set('product', product.barcode, product);
+              if (product && product.barcode) {
+                cache.set('product', product.barcode, product);
+              }
             });
             console.log('프리페치 완료');
           }
@@ -749,6 +752,17 @@ async function loadInitialDataWithBundle() {
 
 // 번들 데이터 적용
 function applyBundleData(bundle) {
+
+  if (bundle.products && Array.isArray(bundle.products)) {
+    AppState.products = bundle.products;
+    
+    // 캐시에 상품 정보 저장
+    bundle.products.forEach(product => {
+      if (product && product.barcode) {
+        cache.set('product', product.barcode, product);
+      }
+    });
+  }
   // 설정
   if (bundle.settings) {
     AppState.settings = bundle.settings;
@@ -916,49 +930,6 @@ function updateStickyFooterSummary() {
   document.getElementById('sticky-total-items').textContent = totalItems;
   document.getElementById('sticky-total-quantity').textContent = totalQuantity;
   document.getElementById('sticky-total-amount').textContent = totalAmount;
-}
-
-function applyBundleData(bundle) {
-  // 상품 데이터
-  if (bundle.productsData) {
-    AppState.products = bundle.productsData.products || [];
-    AppState.productIssues = bundle.productsData.productIssues || {};
-  }
-  
-  // 설정
-  if (bundle.settings) {
-    AppState.settings = bundle.settings;
-  }
-  
-  // 현재 발주서
-  if (bundle.currentOrder) {
-    AppState.currentOrderInfo = bundle.currentOrder;
-    updateOrderStatus();
-    enableOrderFeatures();
-  }
-  
-  // Smaregi 데이터
-  if (bundle.smaregiData) {
-    AppState.smaregiData = bundle.smaregiData.data || {};
-    AppState.smaregiUploadTime = bundle.smaregiData.uploadTime;
-    AppState.smaregiDataLoaded = Object.keys(AppState.smaregiData).length > 0;
-  }
-  
-  // 카테고리 규칙
-  if (bundle.categoryRules) {
-    AppState.categoryRules = bundle.categoryRules;
-  }
-  
-  // UI 초기화
-  setupEventListeners();
-  initializeDisplaySettings();
-  injectColorChipStyles();
-  startAutoSave();
-  
-  // 발주서가 있으면 발주 항목 로드
-  if (AppState.currentOrderInfo) {
-    loadOrderItemsFromSheetAsync();
-  }
 }
 
 // 백그라운드 업데이트 확인
@@ -2439,15 +2410,15 @@ function displaySearchResults(results) {
     
     // 판매 배지 생성 - 초기에는 로딩 상태로
     let salesBadge = '';
+
     if (AppState.smaregiConnected) {
-      if (AppState.salesDataLoaded && salesData[product.barcode]) {
-        salesBadge = createSalesBadge(product.barcode, salesData[product.barcode]);
+      if (AppState.salesDataLoaded && AppState.salesData) {
+        // 판매 데이터가 이미 로드되어 있으면 즉시 표시
+        const productSalesData = AppState.salesData[product.barcode];
+        salesBadge = createSalesBadge(product.barcode, productSalesData);
       } else {
-        // 판매 데이터 로딩 중
-        salesBadge = `<span class="badge badge-sales sales-loading" data-barcode="${product.barcode}">
-          <span class="sales-icon" style="display: inline-flex;">⏳</span>
-          <span class="sales-text">loading..</span>
-        </span>`;
+        // 로드 중
+        salesBadge = createSalesBadge(product.barcode, null);
       }
     }
     
