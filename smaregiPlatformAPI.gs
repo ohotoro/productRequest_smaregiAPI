@@ -78,6 +78,102 @@ function getPlatformStockData(storeId = null) {
   }
 }
 
+/**
+ * 바코드-ProductCode 매핑 생성
+ * @returns {Object} 바코드를 키로 하는 매핑 객체
+ */
+function createBarcodeToProductCodeMap() {
+  try {
+    console.log('=== 바코드-ProductCode 매핑 생성 ===');
+    
+    // 캐시 확인
+    const cacheKey = 'barcode_productcode_map';
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log('캐시된 매핑 사용');
+      return cached;
+    }
+    
+    // 스프레드시트에서 바코드 정보 가져오기
+    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
+    const data = sheet.getDataRange().getValues();
+    
+    // Platform API에서 상품 정보 가져오기
+    const platformProducts = getAllPlatformProducts();
+    
+    const barcodeMap = {};
+    
+    // 바코드와 상품명으로 매칭
+    for (let i = 1; i < data.length; i++) {
+      const barcode = String(data[i][0]);
+      const productName = data[i][1] || '';
+      const option = data[i][2] || '';
+      
+      if (barcode) {
+        // Platform API 상품 중에서 이름이 일치하는 것 찾기
+        const matchedProduct = platformProducts.find(p => {
+          // 정확한 이름 매칭 또는 부분 매칭
+          return p.productName === productName || 
+                 (productName && p.productName && p.productName.includes(productName)) ||
+                 (p.productName && productName && productName.includes(p.productName));
+        });
+        
+        if (matchedProduct) {
+          barcodeMap[barcode] = matchedProduct.productCode;
+        }
+      }
+    }
+    
+    console.log(`${Object.keys(barcodeMap).length}개 바코드 매핑 생성`);
+    
+    // 캐시 저장 (1시간)
+    setCache(cacheKey, barcodeMap, 3600);
+    
+    return barcodeMap;
+    
+  } catch (error) {
+    console.error('바코드 매핑 생성 실패:', error);
+    return {};
+  }
+}
+
+/**
+ * Platform API에서 모든 상품 가져오기
+ * @returns {Array} 상품 배열
+ */
+function getAllPlatformProducts() {
+  try {
+    const products = [];
+    let page = 1;
+    const limit = 1000;
+    
+    while (products.length < 10000) { // 최대 10000개
+      const result = callPlatformAPI(`pos/products?limit=${limit}&page=${page}`);
+      
+      if (!result.success || !result.data || result.data.length === 0) {
+        break;
+      }
+      
+      products.push(...result.data);
+      
+      if (result.data.length < limit) {
+        break;
+      }
+      
+      page++;
+      Utilities.sleep(100); // API 제한 방지
+    }
+    
+    console.log(`총 ${products.length}개 Platform 상품 가져옴`);
+    return products;
+    
+  } catch (error) {
+    console.error('Platform 상품 조회 실패:', error);
+    return [];
+  }
+}
+
 // ===== smaregiPlatformAPI.gs - 필수 함수들 =====
 
 // getCurrentConfig 함수 - Platform API 설정 가져오기
@@ -359,13 +455,13 @@ function getPlatformStockDataOptimized(storeId = null) {
     const stockData = {};
     let totalStock = 0;
     let page = 1;
-    const limit = 100; // 한 번에 가져올 수
+    const limit = 1000; // 한 번에 1000개씩 가져오기 (기존 100개에서 증가)
     
     // 상품 맵을 먼저 가져오기 (캐시됨)
     const productMap = getAllProductsMap();
     
-    // 재고 정보 가져오기
-    while (totalStock < 700) { // 최대 700개까지만
+    // 재고 정보 가져오기 - 제한 없이 모든 데이터 가져오기
+    while (true) { // 제한 제거 (기존: totalStock < 700)
       let endpoint = `pos/stock?limit=${limit}&page=${page}`;
       if (storeId) {
         endpoint += `&store_id=${storeId}`;
@@ -397,7 +493,7 @@ function getPlatformStockDataOptimized(storeId = null) {
         }
       });
       
-      console.log(`페이지 ${page}: ${result.data.length}개 재고 처리`);
+      console.log(`페이지 ${page}: ${result.data.length}개 재고 처리 (누적: ${totalStock}개)`);
       
       // 다음 페이지 없으면 종료
       if (result.data.length < limit) {
@@ -450,7 +546,7 @@ function getAllProductsMap() {
     const limit = 1000; // 한 번에 많이 가져오기
     let totalProducts = 0;
     
-    while (totalProducts < 1000) { // 최대 1000개 제한
+    while (true) { // 제한 제거 (기존: totalProducts < 1000)
       const result = callPlatformAPI(`pos/products?limit=${limit}&page=${page}`);
       
       if (!result.success || !result.data || result.data.length === 0) {
@@ -466,7 +562,7 @@ function getAllProductsMap() {
         totalProducts++;
       });
       
-      console.log(`페이지 ${page}: ${result.data.length}개 상품 처리`);
+      console.log(`페이지 ${page}: ${result.data.length}개 상품 처리 (누적: ${totalProducts}개)`);
       
       if (result.data.length < limit) {
         break;
@@ -1094,5 +1190,114 @@ function getSimpleSalesDataV2(days = 30) {
       success: false,
       error: error.toString()
     };
+  }
+}
+
+// ===== 캐시 완전 클리어 및 테스트 =====
+
+function clearAllSalesCacheAndTest() {
+  try {
+    console.log('=== 모든 판매 캐시 클리어 및 재테스트 ===');
+    
+    // 1. 모든 판매 관련 캐시 삭제
+    const cache = CacheService.getScriptCache();
+    const keysToRemove = [];
+    
+    // 가능한 모든 캐시 키 패턴
+    for (let days = 1; days <= 60; days++) {
+      keysToRemove.push(`sales_simple_v2_${days}_1`);
+      keysToRemove.push(`sales_batch_direct_${days}_*`);
+    }
+    
+    // 캐시 삭제 (최대 30개씩)
+    for (let i = 0; i < keysToRemove.length; i += 30) {
+      const batch = keysToRemove.slice(i, i + 30);
+      try {
+        cache.removeAll(batch);
+      } catch (e) {
+        // 무시
+      }
+    }
+    
+    console.log('모든 판매 캐시 삭제 완료');
+    
+    // 2. 짧은 대기
+    Utilities.sleep(1000);
+    
+    // 3. 실제 판매 상품으로 새로 테스트
+    console.log('\n=== 1000027459 테스트 (캐시 없이) ===');
+    const result1 = getProductSalesData('1000027459');
+    console.log('결과:', JSON.stringify(result1, null, 2));
+    
+    console.log('\n=== 1000027572 테스트 (캐시 없이) ===');
+    const result2 = getProductSalesData('1000027572');
+    console.log('결과:', JSON.stringify(result2, null, 2));
+    
+    // 4. getBatchSalesData 직접 테스트
+    console.log('\n=== getBatchSalesData 직접 테스트 ===');
+    const batchResult30 = getBatchSalesData(['1000027459', '1000027572'], 30);
+    console.log('30일 배치 결과:', JSON.stringify(batchResult30, null, 2));
+    
+    const batchResult10 = getBatchSalesData(['1000027459', '1000027572'], 10);
+    console.log('10일 배치 결과:', JSON.stringify(batchResult10, null, 2));
+    
+    return {
+      individual: {
+        product1: result1,
+        product2: result2
+      },
+      batch: {
+        days30: batchResult30,
+        days10: batchResult10
+      }
+    };
+    
+  } catch (error) {
+    console.error('테스트 실패:', error);
+    return { error: error.toString() };
+  }
+}
+
+// ===== 판매 데이터 직접 확인 =====
+function directSalesDataCheck() {
+  try {
+    console.log('=== 판매 데이터 직접 확인 ===');
+    
+    // 30일 데이터 직접 조회 (캐시 무시)
+    const salesData30 = getSimpleSalesDataV2(30);
+    
+    // 특정 상품 확인
+    const targetProducts = ['1000027459', '1000027572'];
+    const results = {};
+    
+    targetProducts.forEach(productCode => {
+      if (salesData30.data && salesData30.data[productCode]) {
+        results[productCode] = salesData30.data[productCode];
+        console.log(`${productCode}: ${JSON.stringify(salesData30.data[productCode])}`);
+      } else {
+        results[productCode] = null;
+        console.log(`${productCode}: 데이터 없음`);
+      }
+    });
+    
+    // 전체 판매 상품 수
+    const totalProducts = Object.keys(salesData30.data || {}).length;
+    const productsWithSales = Object.values(salesData30.data || {})
+      .filter(p => p.quantity > 0).length;
+    
+    console.log(`총 ${totalProducts}개 상품 중 ${productsWithSales}개에 판매 기록`);
+    
+    return {
+      targetProducts: results,
+      summary: {
+        total: totalProducts,
+        withSales: productsWithSales
+      },
+      success: salesData30.success
+    };
+    
+  } catch (error) {
+    console.error('직접 확인 실패:', error);
+    return { error: error.toString() };
   }
 }
