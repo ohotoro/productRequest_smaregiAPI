@@ -1,7 +1,7 @@
 // ===== salesDataAPI.gs - 판매 데이터 조회 및 분석 =====
 
 /**
- * 여러 상품의 판매 데이터 일괄 조회
+ * 여러 상품의 판매 데이터 일괄 조회 (바코드 매핑 포함)
  * @param {Array} barcodes - 바코드 배열
  * @param {number} days - 조회 기간 (일)
  * @returns {Array} 판매 데이터 배열
@@ -10,14 +10,14 @@ function getBatchSalesData(barcodes, days = 30) {
   try {
     console.log(`=== ${barcodes.length}개 상품의 ${days}일 판매 데이터 조회 ===`);
     
-    // Platform API 직접 확인
+    // Platform API 확인
     if (CONFIG && CONFIG.PLATFORM_CONFIG) {
       const config = getCurrentConfig();
       if (config.CLIENT_ID && config.CLIENT_SECRET) {
         console.log('Platform API로 판매 데이터 조회');
         
         // 캐시 키 생성
-        const cacheKey = `sales_batch_${days}_${Utilities.computeDigest(
+        const cacheKey = `sales_batch_direct_${days}_${Utilities.computeDigest(
           Utilities.DigestAlgorithm.MD5, 
           barcodes.join(',')
         )}`;
@@ -29,79 +29,162 @@ function getBatchSalesData(barcodes, days = 30) {
           return cached;
         }
         
-        // 날짜 범위 설정
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
+        // 판매 데이터 조회
+        const salesResult = getSimpleSalesDataV2(days);
         
-        // 판매 데이터 조회 (간단한 버전)
-        const salesResult = getSimpleSalesDataV2(days + 1);
-        const salesData = {};
-        
-        if (salesResult.success) {
-          // 특정 바코드만 필터링
-          barcodes.forEach(barcode => {
-            if (salesResult.data[barcode]) {
-              salesData[barcode] = salesResult.data[barcode];
-            }
-          });
-        }
-        
-        // 결과 데이터 생성 - 배열로 반환
+        // 결과 데이터 생성 - 바코드를 productCode로 직접 사용
         const results = barcodes.map(barcode => {
-          const sales = salesData[barcode] || {
-            quantity: 0,
-            amount: 0,
-            transactions: []
-          };
+          // 바코드를 productCode로 직접 사용
+          const productCode = barcode;
+          let salesData = null;
           
-          // 일평균 계산
-          const avgDaily = sales.quantity / days;
+          // 판매 데이터가 있는 경우
+          if (salesResult.success && salesResult.data && salesResult.data[productCode]) {
+            salesData = salesResult.data[productCode];
+            console.log(`${barcode}: ${salesData.quantity}개 판매`);
+          }
           
-          // 추세 분석
-          const trend = analyzeSalesTrend(sales.transactions, days);
+          // 데이터가 있는 경우
+          if (salesData) {
+            // 추세 계산
+            let trend = 'stable';
+            if (salesData.transactions && Array.isArray(salesData.transactions)) {
+              trend = analyzeSalesTrend(salesData.transactions, days);
+            } else if (salesData.trend) {
+              trend = salesData.trend;
+            }
+            
+            return {
+              barcode: barcode,
+              quantity: salesData.quantity || 0,
+              avgDaily: parseFloat(((salesData.quantity || 0) / days).toFixed(1)),
+              trend: trend,
+              amount: salesData.amount || 0,
+              transactions: salesData.transactions || 0
+            };
+          }
           
+          // 데이터가 없는 경우 기본값 반환
           return {
             barcode: barcode,
-            quantity: sales.quantity,
-            amount: sales.amount,
-            avgDaily: parseFloat(avgDaily.toFixed(2)),
-            trend: trend,
-            transactions: sales.transactions.length
+            quantity: 0,
+            avgDaily: 0,
+            trend: 'stable',
+            amount: 0,
+            transactions: 0
           };
         });
         
-        // 캐시 저장
-        setCache(cacheKey, results, CACHE_DURATION.LONG);
+        // 캐시 저장 (30분)
+        setCache(cacheKey, results, 1800);
         
-        console.log(`${results.length}개 상품 판매 데이터 조회 완료`);
+        const salesCount = results.filter(r => r.quantity > 0).length;
+        console.log(`${results.length}개 중 ${salesCount}개 상품에 판매 데이터 있음`);
+        
         return results;
       }
     }
     
-    // API 미연결시 빈 배열 반환
-    console.log('판매 데이터 조회 실패 - 빈 데이터 반환');
+    // Legacy API 또는 API 연결 안 됨
+    console.log('API 미연결 - 빈 판매 데이터 반환');
     return barcodes.map(barcode => ({
       barcode: barcode,
       quantity: 0,
-      amount: 0,
       avgDaily: 0,
       trend: 'stable',
+      amount: 0,
       transactions: 0
     }));
     
   } catch (error) {
-    console.error('판매 데이터 조회 에러:', error);
-    // 에러시 빈 배열 반환
+    console.error('판매 데이터 일괄 조회 실패:', error);
+    
+    // 에러 시에도 빈 데이터 반환
     return barcodes.map(barcode => ({
       barcode: barcode,
       quantity: 0,
-      amount: 0,
       avgDaily: 0,
       trend: 'stable',
-      transactions: 0,
-      error: true
+      amount: 0,
+      transactions: 0
     }));
+  }
+}
+
+/**
+ * 개별 상품의 판매 데이터 조회 (수정 버전)
+ * @param {string} barcode - 상품 바코드
+ * @returns {Object} 판매 데이터
+ */
+function getProductSalesData(barcode) {
+  try {
+    if (!barcode) {
+      return {
+        success: false,
+        message: '바코드가 없습니다'
+      };
+    }
+    
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      return {
+        success: false,
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    console.log(`판매 데이터 조회 - 바코드: ${barcode}, 단기: ${shortPeriod}일, 장기: ${longPeriod}일`);
+    
+    // 판매 데이터 조회 - 바코드를 productCode로 직접 사용
+    const longSalesResult = getBatchSalesData([barcode], longPeriod);
+    const shortSalesResult = getBatchSalesData([barcode], shortPeriod);
+    
+    const longSales = longSalesResult && longSalesResult.length > 0 ? longSalesResult[0] : null;
+    const shortSales = shortSalesResult && shortSalesResult.length > 0 ? shortSalesResult[0] : null;
+    
+    // 판매 추세 계산
+    let trend = 'stable';
+    if (longSales && shortSales && longPeriod > 0 && shortPeriod > 0) {
+      const avgLong = (longSales.quantity || 0) / longPeriod;
+      const avgShort = (shortSales.quantity || 0) / shortPeriod;
+      
+      if (avgShort > avgLong * 1.2) {
+        trend = 'up';
+      } else if (avgShort < avgLong * 0.8) {
+        trend = 'down';
+      }
+    }
+    
+    const result = {
+      success: true,
+      salesInfo: {
+        barcode: barcode,
+        quantity: longSales ? longSales.quantity : 0,
+        avgDaily: longSales ? longSales.avgDaily : 0,
+        amount: longSales ? longSales.amount : 0,
+        trend: trend,
+        lastShortDays: shortSales ? shortSales.quantity : 0,
+        lastLongDays: longSales ? longSales.quantity : 0,
+        shortPeriod: shortPeriod,
+        longPeriod: longPeriod
+      }
+    };
+    
+    console.log(`${barcode} 판매 데이터:`, result.salesInfo);
+    
+    return result;
+    
+  } catch (error) {
+    console.error('판매 데이터 조회 실패:', error);
+    return {
+      success: false,
+      message: error.toString()
+    };
   }
 }
 
@@ -158,28 +241,33 @@ function getSmaregiSalesDataByProducts(startDate, endDate, barcodes) {
   }
 }
 
-// 추세 분석 함수 추가
+/**
+ * 추세 분석 함수 (개선 버전)
+ * @param {Array|number} transactions - 거래 데이터 또는 거래 수
+ * @param {number} days - 분석 기간
+ * @returns {string} 추세 ('up', 'down', 'stable')
+ */
 function analyzeSalesTrend(transactions, days) {
-  if (!transactions || transactions.length === 0) {
+  // 데이터가 없으면 stable
+  if (!transactions || (Array.isArray(transactions) && transactions.length === 0)) {
     return 'stable';
   }
   
-  // 트랜잭션이 배열이 아닌 숫자인 경우 (거래 수만 있는 경우)
-  if (typeof transactions === 'number') {
+  // 거래 수만 있는 경우
+  if (typeof transactions === 'number' || !Array.isArray(transactions)) {
     return 'stable';
   }
   
-  // 기간을 반으로 나누어 비교
-  const midPoint = new Date();
-  midPoint.setDate(midPoint.getDate() - Math.floor(days / 2));
-  
-  let firstHalf = 0;
-  let secondHalf = 0;
-  
-  // transactions가 객체 배열인 경우
-  if (Array.isArray(transactions)) {
+  try {
+    // 기간을 반으로 나누어 비교
+    const midPoint = new Date();
+    midPoint.setDate(midPoint.getDate() - Math.floor(days / 2));
+    
+    let firstHalf = 0;
+    let secondHalf = 0;
+    
     transactions.forEach(t => {
-      const transDate = new Date(t.date || t.transactionDateTime);
+      const transDate = new Date(t.date || t.transactionDateTime || t.transaction_date);
       const quantity = t.quantity || 1;
       
       if (transDate < midPoint) {
@@ -188,29 +276,33 @@ function analyzeSalesTrend(transactions, days) {
         secondHalf += quantity;
       }
     });
-  }
-  
-  // 데이터가 없으면 stable
-  if (firstHalf === 0 && secondHalf === 0) {
+    
+    // 데이터가 없으면 stable
+    if (firstHalf === 0 && secondHalf === 0) {
+      return 'stable';
+    }
+    
+    // 첫 반이 0이면 상승
+    if (firstHalf === 0 && secondHalf > 0) {
+      return 'up';
+    }
+    
+    // 둘째 반이 0이면 하락
+    if (firstHalf > 0 && secondHalf === 0) {
+      return 'down';
+    }
+    
+    // 20% 이상 차이가 나면 추세로 판단
+    const change = (secondHalf - firstHalf) / firstHalf;
+    
+    if (change > 0.2) return 'up';
+    if (change < -0.2) return 'down';
+    return 'stable';
+    
+  } catch (error) {
+    console.error('추세 분석 중 오류:', error);
     return 'stable';
   }
-  
-  // 첫 반이 0이면 상승
-  if (firstHalf === 0 && secondHalf > 0) {
-    return 'up';
-  }
-  
-  // 둘째 반이 0이면 하락
-  if (firstHalf > 0 && secondHalf === 0) {
-    return 'down';
-  }
-  
-  // 20% 이상 차이가 나면 추세로 판단
-  const change = (secondHalf - firstHalf) / firstHalf;
-  
-  if (change > 0.2) return 'up';
-  if (change < -0.2) return 'down';
-  return 'stable';
 }
 
 /**
