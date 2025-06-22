@@ -20,12 +20,6 @@ const CACHE_KEYS = {
   TOP_PRODUCTS: 'topProducts'
 };
 
-/**
- * 캐시 저장
- * @param {string} key - 캐시 키
- * @param {any} value - 저장할 값
- * @param {number} duration - 캐시 유효 시간(초)
- */
 const CACHE_DURATION = {
   SHORT: 300,    // 5분
   MEDIUM: 3600,  // 1시간
@@ -67,12 +61,7 @@ function getCachedBoxBarcodes() {
   return boxBarcodes;
 }
 
-
-/**
- * 캐시 조회
- * @param {string} key - 캐시 키
- * @returns {any} 캐시된 값 또는 null
- */
+// 캐시 조회 (청크 지원 추가)
 function getCache(key) {
   try {
     const cache = CacheService.getScriptCache();
@@ -93,40 +82,6 @@ function getCache(key) {
   } catch (error) {
     console.error('캐시 조회 실패:', error);
     return null;
-  }
-}
-
-/**
- * 상품 바코드 목록 가져오기
- * @returns {Array} 바코드 배열
- */
-function getProductBarcodes() {
-  try {
-    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
-    const sheet = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
-    
-    if (!sheet) {
-      throw new Error('상품 시트를 찾을 수 없습니다');
-    }
-    
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
-    
-    const barcodeColumn = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    
-    const barcodes = [];
-    for (let i = 0; i < barcodeColumn.length; i++) {
-      if (barcodeColumn[i][0]) {
-        barcodes.push(String(barcodeColumn[i][0]));
-      }
-    }
-    
-    console.log(`${barcodes.length}개 바코드 로드`);
-    return barcodes;
-    
-  } catch (error) {
-    console.error('바코드 목록 가져오기 실패:', error);
-    return [];
   }
 }
 
