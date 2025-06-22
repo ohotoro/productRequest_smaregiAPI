@@ -1,6 +1,5 @@
 // ===== 전역 설정 Code.gs ===== 
 
-
 // ===== 웹앱 진입점 =====
 function doGet() {
   const template = HtmlService.createTemplateFromFile('index');
@@ -38,125 +37,128 @@ function include(filename) {
 // ===== 초기 데이터 로드 (캐시 크기 문제 해결) =====
 function loadInitialProductsWithIssues() {
   try {
-    console.log('=== 초기 데이터 로드 시작 ===');
     const startTime = new Date();
+    console.log('loadInitialProductsWithIssues 시작');
     
-    // 기본 반환 구조
-    const defaultReturn = {
-      products: [],
-      productIssues: {},
-      cached: false,
-      loadTime: 0
-    };
+    // cacheManager의 getCache 사용
+    const cachedData = getCache(CACHE_KEYS.INITIAL_PRODUCTS);
     
-    // 스프레드시트 ID 확인
-    if (!CONFIG.PRODUCT_SHEET_ID) {
-      console.error('상품 시트 ID가 설정되지 않았습니다.');
-      return defaultReturn;
-    }
-    
-    // 캐시 확인
-    try {
-      const cached = getCache(CACHE_KEYS.INITIAL_PRODUCTS);
-      if (cached && cached.products && Array.isArray(cached.products)) {
-        console.log(`캐시에서 ${cached.products.length}개 상품 반환`);
+    if (cachedData && cachedData.timestamp) {
+      const age = (new Date() - new Date(cachedData.timestamp)) / 1000 / 60;
+      if (age < 30) {
+        console.log('캐시에서 데이터 로드');
         return {
-          products: cached.products,
-          productIssues: cached.productIssues || {},
+          products: cachedData.products || [],
+          productIssues: cachedData.productIssues || {},
           cached: true,
           loadTime: new Date() - startTime
         };
       }
-    } catch (cacheError) {
-      console.warn('캐시 조회 실패:', cacheError);
     }
     
     // 타임아웃 설정 (30초)
-    const timeoutTime = startTime.getTime() + 30000;
+    const maxExecutionTime = 30000;
+    const timeoutTime = startTime.getTime() + maxExecutionTime;
     
-    // 1. 자주 발주 바코드
+    // 병렬로 데이터 수집
     let frequentBarcodes = [];
+    let recentProducts = [];
+    let sharedRecent = [];
+    let productIssues = {};
+    
+    // 1. 자주 발주 바코드 (상위 80개만)
     try {
-      frequentBarcodes = getCachedFrequentBarcodes() || [];
-      console.log(`자주 발주 바코드 ${frequentBarcodes.length}개 로드`);
+      console.log('자주 발주 바코드 로드 시작');
+      frequentBarcodes = getCachedFrequentBarcodes().slice(0, 80);
+      console.log(`자주 발주 바코드 ${frequentBarcodes.length}개 로드 완료`);
+      
+      if (new Date().getTime() > timeoutTime) {
+        throw new Error('타임아웃: 자주 발주 바코드 로드');
+      }
     } catch (e) {
       console.error('자주 발주 바코드 로드 실패:', e);
+      frequentBarcodes = [];
     }
     
-    // 2. 최근 추가 상품
-    let recentProducts = [];
+    // 2. 최근 추가 상품 (50개)
     try {
-      recentProducts = getRecentProducts(50) || [];
-      console.log(`최근 추가 상품 ${recentProducts.length}개 로드`);
+      console.log('최근 추가 상품 로드 시작');
+      recentProducts = getRecentProducts(50);
+      console.log(`최근 추가 상품 ${recentProducts.length}개 로드 완료`);
+      
+      if (new Date().getTime() > timeoutTime) {
+        throw new Error('타임아웃: 최근 추가 상품 로드');
+      }
     } catch (e) {
       console.error('최근 추가 상품 로드 실패:', e);
+      recentProducts = [];
     }
     
-    // 3. 공유 최근 상품
-    let sharedRecent = [];
+    // 3. 공유 최근 상품 (20개)
     try {
-      sharedRecent = getSharedRecentProducts().slice(0, 20) || [];
-      console.log(`공유 최근 상품 ${sharedRecent.length}개 로드`);
+      console.log('공유 최근 상품 로드 시작');
+      sharedRecent = getSharedRecentProducts().slice(0, 20);
+      console.log(`공유 최근 상품 ${sharedRecent.length}개 로드 완료`);
+      
+      if (new Date().getTime() > timeoutTime) {
+        throw new Error('타임아웃: 공유 최근 상품 로드');
+      }
     } catch (e) {
       console.error('공유 최근 상품 로드 실패:', e);
+      sharedRecent = [];
     }
     
     // 4. 제품 이슈사항
-    let productIssues = {};
     try {
-      productIssues = loadProductIssues() || {};
-      console.log(`제품 이슈사항 ${Object.keys(productIssues).length}개 로드`);
+      console.log('제품 이슈사항 로드 시작');
+      productIssues = loadProductIssues();
+      console.log(`제품 이슈사항 ${Object.keys(productIssues).length}개 로드 완료`);
     } catch (e) {
       console.error('제품 이슈사항 로드 실패:', e);
+      productIssues = {};
     }
     
     // 중복 제거 및 병합
     const productMap = new Map();
     
-    // 공유 최근 상품 추가
-    if (Array.isArray(sharedRecent)) {
-      sharedRecent.forEach(p => {
-        if (p && p.barcode) {
-          p.isSharedRecent = true;
-          p.priority = 1;
-          productMap.set(p.barcode, p);
-        }
-      });
-    }
+    // 우선순위대로 추가
+    sharedRecent.forEach(p => {
+      if (p && p.barcode) {
+        p.isSharedRecent = true;
+        p.priority = 1;
+        productMap.set(p.barcode, p);
+      }
+    });
     
     // 자주 발주 상품 정보 가져오기
     if (frequentBarcodes.length > 0) {
       try {
-        const frequentProducts = getProductsByBarcodes(frequentBarcodes) || [];
-        if (Array.isArray(frequentProducts)) {
-          frequentProducts.forEach(p => {
-            if (p && p.barcode) {
-              if (!productMap.has(p.barcode)) {
-                productMap.set(p.barcode, p);
-              }
-              const existing = productMap.get(p.barcode);
-              existing.isFrequent = true;
-              existing.priority = Math.min(existing.priority || 999, 2);
+        const frequentProducts = getProductsByBarcodes(frequentBarcodes);
+        frequentProducts.forEach(p => {
+          if (p && p.barcode) {
+            if (!productMap.has(p.barcode)) {
+              productMap.set(p.barcode, p);
             }
-          });
-        }
+            const existing = productMap.get(p.barcode);
+            existing.isFrequent = true;
+            existing.priority = Math.min(existing.priority || 999, 2);
+          }
+        });
       } catch (e) {
         console.error('자주 발주 상품 정보 로드 실패:', e);
       }
     }
     
     // 최근 추가 상품
-    if (Array.isArray(recentProducts)) {
-      recentProducts.forEach(p => {
-        if (p && p.barcode) {
-          if (!productMap.has(p.barcode)) {
-            productMap.set(p.barcode, p);
-          }
-          const existing = productMap.get(p.barcode);
-          existing.isRecent = p.isRecent;
+    recentProducts.forEach(p => {
+      if (p && p.barcode) {
+        if (!productMap.has(p.barcode)) {
+          productMap.set(p.barcode, p);
         }
-      });
-    }
+        const existing = productMap.get(p.barcode);
+        existing.isRecent = p.isRecent;
+      }
+    });
     
     // 이슈 정보 병합
     productMap.forEach((product, barcode) => {
@@ -170,7 +172,7 @@ function loadInitialProductsWithIssues() {
       .sort((a, b) => (a.priority || 999) - (b.priority || 999))
       .slice(0, 100); // 100개로 제한
     
-    // 캐시 저장 시도
+    // cacheManager의 setCache 사용
     try {
       const dataToCache = {
         products: products,
@@ -194,14 +196,12 @@ function loadInitialProductsWithIssues() {
     
   } catch (error) {
     console.error('통합 데이터 로드 실패:', error);
-    
-    // 오류가 발생해도 기본 구조는 반환
     return {
       products: [],
       productIssues: {},
       error: error.toString(),
       cached: false,
-      loadTime: 0
+      loadTime: new Date() - startTime
     };
   }
 }
@@ -1182,9 +1182,6 @@ function getSettings() {
   // 음성 설정 추가
   const voiceSettings = getVoiceSettings();
   
-  // 박스 바코드는 스프레드시트에서 가져오기
-  const boxBarcodes = getBoxBarcodesFromSheet();
-  
   return {
     productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
     orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
@@ -1196,16 +1193,10 @@ function getSettings() {
     suggestStock20: settings.suggestStock20 || '10',
     boxMode: settings.boxMode || 'barcode',
     boxDigits: settings.boxDigits || '3',
-    boxBarcodes: boxBarcodes, // 스프레드시트에서 가져온 데이터
+    boxBarcodes: getBoxBarcodesFromSheet(),
     maxLowStockDisplay: settings.maxLowStockDisplay || '50',
     // 음성 설정 추가
-    voiceSettings: voiceSettings,
-    // 판매 기간 설정 추가
-    salesPeriodShort: settings.salesPeriodShort || '7',
-    salesPeriodLong: settings.salesPeriodLong || '30',
-    salesThresholdHot: settings.salesThresholdHot || '20',
-    salesThresholdPopular: settings.salesThresholdPopular || '10',
-    salesThresholdNormal: settings.salesThresholdNormal || '5'
+    voiceSettings: voiceSettings
   };
 }
 
@@ -1309,23 +1300,6 @@ function updateSettings(newSettings) {
       if (!voiceResult.success) {
         return voiceResult;
       }
-    }
-
-    // 판매 기간 설정 추가
-    if (newSettings.salesPeriodShort) {
-      userProperties.setProperty('salesPeriodShort', newSettings.salesPeriodShort);
-    }
-    if (newSettings.salesPeriodLong) {
-      userProperties.setProperty('salesPeriodLong', newSettings.salesPeriodLong);
-    }
-    if (newSettings.salesThresholdHot) {
-      userProperties.setProperty('salesThresholdHot', newSettings.salesThresholdHot);
-    }
-    if (newSettings.salesThresholdPopular) {
-      userProperties.setProperty('salesThresholdPopular', newSettings.salesThresholdPopular);
-    }
-    if (newSettings.salesThresholdNormal) {
-      userProperties.setProperty('salesThresholdNormal', newSettings.salesThresholdNormal);
     }
     
     return { success: true, message: '설정이 저장되었습니다.' };
@@ -3034,6 +3008,30 @@ function getVoiceSettings() {
   }
 }
 
+// 설정에 박스번호 관련 추가
+function getSettings() {
+  const userProperties = PropertiesService.getUserProperties();
+  const settings = userProperties.getProperties();
+  
+  // 박스 바코드는 스프레드시트에서 가져오기
+  const boxBarcodes = getBoxBarcodesFromSheet();
+  
+  return {
+    productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
+    orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
+    maxSearchResults: settings.maxSearchResults || CONFIG.MAX_SEARCH_RESULTS,
+    language: settings.language || 'ko',
+    monthlyBudget: settings.monthlyBudget || 10000000,
+    suggestStock0: settings.suggestStock0 || '30',
+    suggestStock10: settings.suggestStock10 || '20',
+    suggestStock20: settings.suggestStock20 || '10',
+    // 박스 설정
+    boxMode: settings.boxMode || 'barcode',
+    boxDigits: settings.boxDigits || '3',
+    boxBarcodes: boxBarcodes // 스프레드시트에서 가져온 데이터
+  };
+}
+
 // 출고 세션 저장/복원
 function saveShippingSession(sessionData) {
   try {
@@ -3576,369 +3574,5 @@ function resetAllBoxNumbers(orderId) {
       success: false,
       message: error.toString()
     };
-  }
-}
-
-/**
- * 웹앱에서 Smaregi 재고 데이터 가져오기
- * @returns {Object} 재고 데이터
- */
-function getSmaregiData() {
-  try {
-    console.log('=== getSmaregiData 호출 ===');
-    
-    // Smaregi API 사용 가능 확인
-    if (!isSmaregiAvailable()) {
-      console.log('Smaregi API 사용 불가');
-      return {
-        data: {},
-        uploadTime: null,
-        success: false
-      };
-    }
-    
-    // 재고 데이터 가져오기
-    const stockResult = getSmaregiStockData();
-    
-    if (stockResult.success && stockResult.data) {
-      console.log(`Smaregi 재고 데이터: ${Object.keys(stockResult.data).length}개`);
-      
-      // 바코드를 키로 하는 객체로 변환
-      const stockMap = {};
-      Object.entries(stockResult.data).forEach(([barcode, info]) => {
-        // 재고 수량만 저장 (메모리 절약)
-        stockMap[barcode] = info.quantity || 0;
-      });
-      
-      return {
-        data: stockMap,
-        uploadTime: stockResult.timestamp || new Date().toISOString(),
-        success: true
-      };
-    }
-    
-    return {
-      data: {},
-      uploadTime: null,
-      success: false
-    };
-    
-  } catch (error) {
-    console.error('getSmaregiData 오류:', error);
-    return {
-      data: {},
-      uploadTime: null,
-      success: false,
-      error: error.toString()
-    };
-  }
-}
-
-/**
- * Smaregi API 사용 가능 여부 확인
- * @returns {boolean} 사용 가능 여부
- */
-function isSmaregiAvailable() {
-  try {
-    // Platform API 설정 확인
-    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
-      const config = getCurrentConfig();
-      return !!(config.CLIENT_ID && config.CLIENT_SECRET);
-    }
-    
-    // Legacy API 설정 확인 (있다면)
-    const userProps = PropertiesService.getUserProperties();
-    const apiKey = userProps.getProperty('SMAREGI_API_KEY');
-    
-    return !!apiKey;
-    
-  } catch (error) {
-    console.error('Smaregi 사용 가능 여부 확인 실패:', error);
-    return false;
-  }
-}
-
-/**
- * 개별 상품의 판매 데이터 조회 (웹앱에서 사용)
- * @param {string} barcode - 상품 바코드
- * @returns {Object} 판매 데이터
- */
-function getProductSalesData(barcode) {
-  try {
-    if (!barcode) {
-      return {
-        success: false,
-        message: '바코드가 없습니다'
-      };
-    }
-    
-    // API 연결 확인
-    if (!isSmaregiAvailable()) {
-      return {
-        success: false,
-        message: 'Smaregi API가 연결되지 않았습니다'
-      };
-    }
-    
-    // 설정에서 기간 가져오기
-    const settings = getSettings();
-    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
-    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
-    
-    console.log(`판매 데이터 조회 - 바코드: ${barcode}, 단기: ${shortPeriod}일, 장기: ${longPeriod}일`);
-    
-    // 장기 판매 데이터 조회
-    const endDate = new Date();
-    const longStartDate = new Date();
-    longStartDate.setDate(longStartDate.getDate() - longPeriod);
-    
-    // 단기 판매 데이터 조회
-    const shortStartDate = new Date();
-    shortStartDate.setDate(shortStartDate.getDate() - shortPeriod);
-    
-    // API에서 판매 데이터 가져오기
-    const longSalesResult = getBatchSalesData([barcode], longPeriod);
-    const shortSalesResult = getBatchSalesData([barcode], shortPeriod);
-    
-    const longSales = longSalesResult && longSalesResult.length > 0 ? longSalesResult[0] : null;
-    const shortSales = shortSalesResult && shortSalesResult.length > 0 ? shortSalesResult[0] : null;
-    
-    // 판매 추세 계산
-    let trend = 'stable';
-    if (longSales && shortSales) {
-      const avgLong = longSales.quantity / longPeriod;
-      const avgShort = shortSales.quantity / shortPeriod;
-      
-      if (avgShort > avgLong * 1.2) {
-        trend = 'up';
-      } else if (avgShort < avgLong * 0.8) {
-        trend = 'down';
-      }
-    }
-    
-    const result = {
-      success: true,
-      salesInfo: {
-        barcode: barcode,
-        lastShortDays: shortSales ? shortSales.quantity : 0,
-        lastLongDays: longSales ? longSales.quantity : 0,
-        dailyAverage: longSales ? parseFloat((longSales.quantity / longPeriod).toFixed(1)) : 0,
-        trend: trend,
-        shortPeriod: shortPeriod,
-        longPeriod: longPeriod,
-        amount: longSales ? longSales.amount : 0
-      }
-    };
-    
-    console.log(`${barcode} 판매 데이터:`, result.salesInfo);
-    
-    return result;
-    
-  } catch (error) {
-    console.error('판매 데이터 조회 실패:', error);
-    return {
-      success: false,
-      message: error.toString()
-    };
-  }
-}
-
-// ===== Code.gs에 추가할 함수들 =====
-
-/**
- * 여러 바코드로 상품 조회 (프리페치용)
- */
-function getProductsByBarcodes(barcodes) {
-  if (!barcodes || barcodes.length === 0) return [];
-  
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상품 데이터베이스');
-    if (!sheet) return [];
-    
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const barcodeIndex = headers.indexOf('バーコード');
-    
-    if (barcodeIndex === -1) return [];
-    
-    const products = [];
-    const barcodeSet = new Set(barcodes);
-    
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const barcode = String(row[barcodeIndex]);
-      
-      if (barcodeSet.has(barcode)) {
-        const product = {};
-        headers.forEach((header, index) => {
-          product[header] = row[index];
-        });
-        products.push(product);
-        
-        // 찾은 바코드는 제거 (중복 방지)
-        barcodeSet.delete(barcode);
-        
-        // 모두 찾았으면 종료
-        if (barcodeSet.size === 0) break;
-      }
-    }
-    
-    return products;
-    
-  } catch (error) {
-    console.error('상품 일괄 조회 실패:', error);
-    return [];
-  }
-}
-
-/**
- * 초기 데이터 번들 (최적화)
- */
-function getInitialDataBundle() {
-  const startTime = new Date().getTime();
-  
-  try {
-    // 캐시 확인
-    const cached = getCache('INITIAL_BUNDLE');
-    if (cached) {
-      console.log('번들 캐시 사용');
-      return cached;
-    }
-    
-    console.log('초기 데이터 번들 생성 시작');
-    
-    const bundle = {
-      timestamp: new Date().toISOString(),
-      settings: getSettings(),
-      translations: loadTranslations((getSettings().language || 'japanese')),
-      currentOrder: checkCurrentOrder(),
-      categoryRules: getCachedCategoryRules(),
-      smaregiData: null,
-      products: null
-    };
-    
-    // 상품 데이터 로드
-    const productsData = loadInitialProductsWithIssues();
-    bundle.products = {
-      data: productsData.products,
-      withIssues: productsData.withIssues,
-      totalCount: productsData.totalCount
-    };
-    
-    // Smaregi 데이터
-    const smaregiData = getSmaregiData();
-    if (smaregiData) {
-      bundle.smaregiData = {
-        data: smaregiData,
-        uploadTime: PropertiesService.getScriptProperties().getProperty('smaregiUploadTime')
-      };
-    }
-    
-    // 발주서가 있으면 발주 항목도 포함
-    if (bundle.currentOrder) {
-      bundle.orderItems = loadOrderItemsFromSheet(bundle.currentOrder.sheetName);
-    }
-    
-    // 캐시 저장 (10분)
-    setCache('INITIAL_BUNDLE', bundle, 600);
-    
-    const loadTime = new Date().getTime() - startTime;
-    console.log(`번들 생성 완료: ${loadTime}ms`);
-    
-    return bundle;
-    
-  } catch (error) {
-    console.error('번들 생성 실패:', error);
-    // 실패시 개별 로드로 폴백
-    return null;
-  }
-}
-
-/**
- * 카테고리 규칙 캐시 버전
- */
-function getCachedCategoryRules() {
-  const cached = getCache(CACHE_KEYS.CATEGORY_RULES);
-  if (cached) return cached;
-  
-  const rules = loadCategoryRules();
-  setCache(CACHE_KEYS.CATEGORY_RULES, rules, CACHE_DURATION.LONG);
-  return rules;
-}
-
-// 초기 로드 데이터 병렬 처리
-function getInitialLoadData() {
-  try {
-    console.log('=== 초기 데이터 병렬 로드 시작 ===');
-    
-    // 병렬로 데이터 로드
-    const promises = [
-      // 상품 데이터
-      (() => {
-        try {
-          return {
-            type: 'products',
-            data: loadInitialProductsWithIssues()
-          };
-        } catch (e) {
-          console.error('상품 로드 실패:', e);
-          return { type: 'products', data: null, error: e.toString() };
-        }
-      })(),
-      
-      // 재고 데이터
-      (() => {
-        try {
-          return {
-            type: 'stock',
-            data: getSmaregiStockData()
-          };
-        } catch (e) {
-          console.error('재고 로드 실패:', e);
-          return { type: 'stock', data: null, error: e.toString() };
-        }
-      })(),
-      
-      // 판매 데이터 (첫 50개만)
-      (() => {
-        try {
-          const salesData = {};
-          const products = getFrequentProducts(50);
-          
-          products.forEach(product => {
-            const sales = getCachedSalesData(product.barcode);
-            if (sales) {
-              salesData[product.barcode] = sales;
-            }
-          });
-          
-          return {
-            type: 'sales',
-            data: { success: true, data: salesData }
-          };
-        } catch (e) {
-          console.error('판매 로드 실패:', e);
-          return { type: 'sales', data: null, error: e.toString() };
-        }
-      })()
-    ];
-    
-    // 결과 정리
-    const result = {
-      products: null,
-      stock: null,
-      sales: null
-    };
-    
-    promises.forEach(item => {
-      result[item.type] = item.data;
-    });
-    
-    console.log('=== 초기 데이터 로드 완료 ===');
-    return result;
-    
-  } catch (error) {
-    console.error('초기 데이터 로드 실패:', error);
-    throw error;
   }
 }
