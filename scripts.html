@@ -2732,27 +2732,56 @@ function loadSearchResultsSalesData(results) {
     .getBatchSalesData(barcodes, longPeriod);
 }
 
-// updateSalesBadge 함수 추가 (loadSearchResultsSalesData 함수 아래에 추가)
+/**
+ * 판매 배지 업데이트 함수 (수정 버전)
+ * @param {string} barcode - 상품 바코드
+ * @param {Object} salesData - 판매 데이터
+ * @param {number} shortPeriod - 단기 기간
+ * @param {number} longPeriod - 장기 기간
+ */
 function updateSalesBadge(barcode, salesData, shortPeriod, longPeriod) {
   const badge = document.querySelector(`.badge-sales[data-barcode="${barcode}"]`);
-  if (!badge) return;
+  if (!badge) {
+    console.log(`배지를 찾을 수 없음: ${barcode}`);
+    return;
+  }
   
   // 로딩 상태 제거
   badge.classList.remove('loading');
   
+  // 데이터 로깅
+  console.log(`배지 업데이트 - ${barcode}:`, salesData);
+  
+  // salesData가 있는지 확인하고 기본값 설정
+  const processedData = salesData || {
+    barcode: barcode,
+    quantity: 0,
+    avgDaily: 0,
+    trend: 'stable'
+  };
+  
   // 새로운 배지 생성
-  const newBadgeHtml = createSalesBadge(barcode, salesData);
+  const newBadgeHtml = createSalesBadge(barcode, processedData);
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = newBadgeHtml;
   
   // 기존 배지를 새 배지로 교체
-  badge.replaceWith(tempDiv.firstChild);
+  if (tempDiv.firstChild) {
+    badge.replaceWith(tempDiv.firstChild);
+  }
   
-  // 툴팁 이벤트 재초기화
-  initializeSalesTooltips();
+  // 툴팁 이벤트 재초기화 (지연 실행)
+  setTimeout(() => {
+    initializeSalesTooltips();
+  }, 100);
 }
 
-// ===== 개별 판매 배지 업데이트 =====
+/**
+ * 판매 배지 생성 함수 (수정 버전)
+ * @param {string} barcode - 상품 바코드
+ * @param {Object} salesData - 판매 데이터
+ * @returns {string} HTML 문자열
+ */
 function createSalesBadge(barcode, salesData) {
   const settings = AppState.settings || {};
   const hotThreshold = parseInt(settings.salesThresholdHot) || 20;
@@ -2776,82 +2805,74 @@ function createSalesBadge(barcode, salesData) {
     </span>`;
   }
   
-  // 판매 데이터가 없는 경우
-  if (!salesData || salesData.error) {
-    return `<span class="product-badge badge-sales sales-none" data-barcode="${barcode}">
-      <span class="sales-icon">—</span>
-      <span class="sales-text">판매 없음</span>
+  // 판매 데이터 오류 확인
+  if (salesData && salesData.error) {
+    return `<span class="product-badge badge-sales sales-error" data-barcode="${barcode}">
+      <span class="sales-icon">⚠️</span>
+      <span class="sales-text">조회 실패</span>
     </span>`;
   }
   
-  // avgDaily가 undefined인 경우 quantity로 계산
-  let avgDaily = salesData.avgDaily;
-  if (avgDaily === undefined && salesData.quantity !== undefined) {
-    avgDaily = salesData.quantity / longPeriod;
+  // 판매 데이터가 있는 경우
+  if (salesData) {
+    const totalQty = salesData.quantity || 0;
+    const avgDaily = salesData.avgDaily || 0;
+    const trend = salesData.trend || 'stable';
+    
+    // 판매 수준 결정
+    let level, icon, text;
+    
+    if (totalQty === 0) {
+      level = 'none';
+      icon = '—';
+      text = '판매 없음';
+    } else if (totalQty >= hotThreshold) {
+      level = 'hot';
+      icon = '🔥';
+      text = '인기 상품';
+    } else if (totalQty >= popularThreshold) {
+      level = 'popular';
+      icon = '⭐';
+      text = '판매 양호';
+    } else if (totalQty >= normalThreshold) {
+      level = 'normal';
+      icon = '📊';
+      text = '일반 판매';
+    } else {
+      level = 'slow';
+      icon = '🐌';
+      text = '판매 부진';
+    }
+    
+    // 추세 클래스
+    const trendClass = `trend-${trend}`;
+    
+    // 배지 HTML - 데이터 속성 수정
+    return `<span class="product-badge badge-sales sales-${level} ${trendClass}" 
+      data-barcode="${barcode}"
+      data-quantity="${totalQty}"
+      data-avg-daily="${avgDaily}"
+      data-trend="${trend}"
+      data-period="${longPeriod}"
+      data-total="${totalQty}"
+      data-avg="${avgDaily}"
+      title="${longPeriod}일간 ${totalQty}개 판매 (일평균 ${avgDaily}개)">
+      <span class="sales-icon">${icon}</span>
+      <span class="sales-text">${text}</span>
+    </span>`;
   }
   
-  avgDaily = avgDaily || 0;
-  
-  let salesLevel = '';
-  let iconEmoji = '📊';
-  let badgeClass = '';
-  let displayText = '';
-  
-  if (avgDaily >= hotThreshold) {
-    salesLevel = 'hot';
-    iconEmoji = '🔥';
-    badgeClass = 'sales-hot';
-    displayText = `일 ${Math.round(avgDaily)}개`;
-  } else if (avgDaily >= popularThreshold) {
-    salesLevel = 'popular';
-    iconEmoji = '⭐';
-    badgeClass = 'sales-popular';
-    displayText = `일 ${Math.round(avgDaily)}개`;
-  } else if (avgDaily >= normalThreshold) {
-    salesLevel = 'normal';
-    iconEmoji = '✓';
-    badgeClass = 'sales-normal';
-    displayText = `일 ${avgDaily.toFixed(1)}개`;
-  } else if (avgDaily > 0) {
-    salesLevel = 'low';
-    iconEmoji = '📊';
-    badgeClass = 'sales-low';
-    displayText = `일 ${avgDaily.toFixed(1)}개`;
-  } else {
-    salesLevel = 'none';
-    iconEmoji = '—';
-    badgeClass = 'sales-none';
-    displayText = '판매 없음';
-  }
-  
-  const trend = salesData.trend || 'stable';
-  const trendEmoji = trend === 'up' ? '📈' : trend === 'down' ? '📉' : '➡️';
-  const totalQty = salesData.quantity || 0;
-  
-  return `<span class="product-badge badge-sales ${badgeClass}" 
-                data-barcode="${barcode}"
-                data-total="${totalQty}"
-                data-avg="${avgDaily}"
-                data-trend="${trend}">
-    <span class="sales-icon">${iconEmoji}</span>
-    <span class="sales-text">${displayText}</span>
-    <div class="sales-tooltip">
-      <div class="tooltip-header">판매 정보 (${longPeriod}일)</div>
-      <div class="tooltip-content">
-        <div class="tooltip-row">
-          <span class="tooltip-label">총 판매량:</span>
-          <span class="tooltip-value">${totalQty}개</span>
-        </div>
-        <div class="tooltip-row">
-          <span class="tooltip-label">일평균:</span>
-          <span class="tooltip-value">${avgDaily.toFixed(1)}개</span>
-        </div>
-        <div class="tooltip-row">
-          <span class="tooltip-label">추세:</span>
-          <span class="tooltip-value">${trendEmoji} ${trend === 'up' ? '상승' : trend === 'down' ? '하락' : '유지'}</span>
-        </div>
-      </div>
-    </div>
+  // 데이터가 전혀 없는 경우 (기본값)
+  return `<span class="product-badge badge-sales sales-none" 
+    data-barcode="${barcode}"
+    data-quantity="0"
+    data-avg-daily="0"
+    data-trend="stable"
+    data-period="${longPeriod}"
+    data-total="0"
+    data-avg="0">
+    <span class="sales-icon">—</span>
+    <span class="sales-text">판매 없음</span>
   </span>`;
 }
 
