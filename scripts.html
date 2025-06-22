@@ -1051,7 +1051,7 @@ async function loadSalesDataAsync() {
     google.script.run
       .withSuccessHandler((result) => {
         if (result && result.success && result.data) {
-          // 데이터 구조 변환 - 이미 객체 형태로 제공되면 그대로 사용
+          // 데이터 구조 변환
           const salesDataObj = {};
           
           // result.data가 이미 바코드를 키로 하는 객체인 경우
@@ -1060,7 +1060,7 @@ async function loadSalesDataAsync() {
               const item = result.data[barcode];
               salesDataObj[barcode] = {
                 quantity: item.quantity || 0,
-                avgDaily: item.quantity ? (item.quantity / (result.period || 30)) : 0,
+                avgDaily: item.avgDaily || 0,
                 amount: item.amount || 0,
                 trend: item.trend || 'stable',
                 transactions: item.transactions || []
@@ -1070,22 +1070,23 @@ async function loadSalesDataAsync() {
           
           AppState.salesData = salesDataObj;
           AppState.salesDataLoaded = true;
-          AppState.salesDataTimestamp = result.timestamp;
+          AppState.salesDataTimestamp = result.timestamp || new Date().toISOString();
           AppState.salesDataPeriod = result.period || 30;
           
           console.log(`판매 데이터 로드 완료: ${Object.keys(salesDataObj).length}개 상품`);
           resolve(salesDataObj);
         } else {
+          // 실패 시에도 빈 객체로 초기화
           AppState.salesData = {};
-          AppState.salesDataLoaded = false;
-          console.log('판매 데이터 로드 실패');
+          AppState.salesDataLoaded = true; // 로드는 완료된 것으로 처리
+          console.log('판매 데이터 없음 또는 로드 실패');
           resolve({});
         }
       })
       .withFailureHandler((error) => {
         console.warn('판매 데이터 로드 실패:', error);
         AppState.salesData = {};
-        AppState.salesDataLoaded = false;
+        AppState.salesDataLoaded = true; // 실패해도 로드 완료로 처리
         resolve({});
       })
       .loadAllProductsSalesData();
@@ -2715,18 +2716,24 @@ function loadSearchResultsSalesData(results) {
   
   // 바코드 목록 추출
   const barcodes = results.map(p => p.barcode);
+  console.log('조회할 바코드:', barcodes);
   
   // 서버에서 판매 데이터 조회
   google.script.run
     .withSuccessHandler(function(salesDataArray) {
       console.log('판매 데이터 조회 성공:', salesDataArray);
       
+      // 판매 데이터 로드 완료 표시
+      AppState.salesDataLoaded = true;
+      
       salesDataArray.forEach(salesData => {
+        console.log(`${salesData.barcode}: ${salesData.quantity}개 판매`);
         updateSalesBadge(salesData.barcode, salesData, shortPeriod, longPeriod);
       });
     })
     .withFailureHandler(function(error) {
       console.error('판매 데이터 조회 실패:', error);
+      AppState.salesDataLoaded = true; // 실패해도 로드 완료 처리
       updateAllSalesBadges('error');
     })
     .getBatchSalesData(barcodes, longPeriod);
@@ -2740,8 +2747,16 @@ function updateSalesBadge(barcode, salesData, shortPeriod, longPeriod) {
   // 로딩 상태 제거
   badge.classList.remove('loading');
   
+  // salesData가 null이 아니면 정상 데이터로 처리
+  const processedData = salesData || {
+    barcode: barcode,
+    quantity: 0,
+    avgDaily: 0,
+    trend: 'stable'
+  };
+  
   // 새로운 배지 생성
-  const newBadgeHtml = createSalesBadge(barcode, salesData);
+  const newBadgeHtml = createSalesBadge(barcode, processedData);
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = newBadgeHtml;
   
@@ -2776,82 +2791,65 @@ function createSalesBadge(barcode, salesData) {
     </span>`;
   }
   
-  // 판매 데이터가 없는 경우
-  if (!salesData || salesData.error) {
-    return `<span class="product-badge badge-sales sales-none" data-barcode="${barcode}">
-      <span class="sales-icon">—</span>
-      <span class="sales-text">판매 없음</span>
+  // 판매 데이터 오류 확인
+  if (salesData && salesData.error) {
+    return `<span class="product-badge badge-sales sales-error" data-barcode="${barcode}">
+      <span class="sales-icon">⚠️</span>
+      <span class="sales-text">조회 실패</span>
     </span>`;
   }
   
-  // avgDaily가 undefined인 경우 quantity로 계산
-  let avgDaily = salesData.avgDaily;
-  if (avgDaily === undefined && salesData.quantity !== undefined) {
-    avgDaily = salesData.quantity / longPeriod;
+  // 판매 데이터가 있는 경우 (quantity가 0이어도 정상 처리)
+  if (salesData) {
+    const totalQty = salesData.quantity || 0;
+    const avgDaily = salesData.avgDaily || 0;
+    const trend = salesData.trend || 'stable';
+    
+    // 판매 수준 결정
+    let level, icon, text;
+    
+    if (totalQty === 0) {
+      level = 'none';
+      icon = '—';
+      text = '판매 없음';
+    } else if (totalQty >= hotThreshold) {
+      level = 'hot';
+      icon = '🔥';
+      text = '인기 상품';
+    } else if (totalQty >= popularThreshold) {
+      level = 'popular';
+      icon = '⭐';
+      text = '판매 양호';
+    } else if (totalQty >= normalThreshold) {
+      level = 'normal';
+      icon = '📊';
+      text = '일반 판매';
+    } else {
+      level = 'slow';
+      icon = '🐌';
+      text = '판매 부진';
+    }
+    
+    // 추세 클래스
+    const trendClass = `trend-${trend}`;
+    
+    // 배지 HTML
+    return `<span class="product-badge badge-sales sales-${level} ${trendClass}" 
+      data-barcode="${barcode}"
+      data-quantity="${totalQty}"
+      data-avg-daily="${avgDaily.toFixed(1)}"
+      data-trend="${trend}"
+      data-period="${longPeriod}"
+      title="${longPeriod}일간 ${totalQty}개 판매 (일평균 ${avgDaily.toFixed(1)}개)">
+      <span class="sales-icon">${icon}</span>
+      <span class="sales-text">${text}</span>
+    </span>`;
   }
   
-  avgDaily = avgDaily || 0;
-  
-  let salesLevel = '';
-  let iconEmoji = '📊';
-  let badgeClass = '';
-  let displayText = '';
-  
-  if (avgDaily >= hotThreshold) {
-    salesLevel = 'hot';
-    iconEmoji = '🔥';
-    badgeClass = 'sales-hot';
-    displayText = `일 ${Math.round(avgDaily)}개`;
-  } else if (avgDaily >= popularThreshold) {
-    salesLevel = 'popular';
-    iconEmoji = '⭐';
-    badgeClass = 'sales-popular';
-    displayText = `일 ${Math.round(avgDaily)}개`;
-  } else if (avgDaily >= normalThreshold) {
-    salesLevel = 'normal';
-    iconEmoji = '✓';
-    badgeClass = 'sales-normal';
-    displayText = `일 ${avgDaily.toFixed(1)}개`;
-  } else if (avgDaily > 0) {
-    salesLevel = 'low';
-    iconEmoji = '📊';
-    badgeClass = 'sales-low';
-    displayText = `일 ${avgDaily.toFixed(1)}개`;
-  } else {
-    salesLevel = 'none';
-    iconEmoji = '—';
-    badgeClass = 'sales-none';
-    displayText = '판매 없음';
-  }
-  
-  const trend = salesData.trend || 'stable';
-  const trendEmoji = trend === 'up' ? '📈' : trend === 'down' ? '📉' : '➡️';
-  const totalQty = salesData.quantity || 0;
-  
-  return `<span class="product-badge badge-sales ${badgeClass}" 
-                data-barcode="${barcode}"
-                data-total="${totalQty}"
-                data-avg="${avgDaily}"
-                data-trend="${trend}">
-    <span class="sales-icon">${iconEmoji}</span>
-    <span class="sales-text">${displayText}</span>
-    <div class="sales-tooltip">
-      <div class="tooltip-header">판매 정보 (${longPeriod}일)</div>
-      <div class="tooltip-content">
-        <div class="tooltip-row">
-          <span class="tooltip-label">총 판매량:</span>
-          <span class="tooltip-value">${totalQty}개</span>
-        </div>
-        <div class="tooltip-row">
-          <span class="tooltip-label">일평균:</span>
-          <span class="tooltip-value">${avgDaily.toFixed(1)}개</span>
-        </div>
-        <div class="tooltip-row">
-          <span class="tooltip-label">추세:</span>
-          <span class="tooltip-value">${trendEmoji} ${trend === 'up' ? '상승' : trend === 'down' ? '하락' : '유지'}</span>
-        </div>
-      </div>
-    </div>
+  // 데이터가 전혀 없는 경우
+  return `<span class="product-badge badge-sales sales-none" data-barcode="${barcode}">
+    <span class="sales-icon">—</span>
+    <span class="sales-text">데이터 없음</span>
   </span>`;
 }
 
