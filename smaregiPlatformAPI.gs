@@ -78,102 +78,6 @@ function getPlatformStockData(storeId = null) {
   }
 }
 
-/**
- * 바코드-ProductCode 매핑 생성
- * @returns {Object} 바코드를 키로 하는 매핑 객체
- */
-function createBarcodeToProductCodeMap() {
-  try {
-    console.log('=== 바코드-ProductCode 매핑 생성 ===');
-    
-    // 캐시 확인
-    const cacheKey = 'barcode_productcode_map';
-    const cached = getCache(cacheKey);
-    if (cached) {
-      console.log('캐시된 매핑 사용');
-      return cached;
-    }
-    
-    // 스프레드시트에서 바코드 정보 가져오기
-    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
-    const sheet = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
-    const data = sheet.getDataRange().getValues();
-    
-    // Platform API에서 상품 정보 가져오기
-    const platformProducts = getAllPlatformProducts();
-    
-    const barcodeMap = {};
-    
-    // 바코드와 상품명으로 매칭
-    for (let i = 1; i < data.length; i++) {
-      const barcode = String(data[i][0]);
-      const productName = data[i][1] || '';
-      const option = data[i][2] || '';
-      
-      if (barcode) {
-        // Platform API 상품 중에서 이름이 일치하는 것 찾기
-        const matchedProduct = platformProducts.find(p => {
-          // 정확한 이름 매칭 또는 부분 매칭
-          return p.productName === productName || 
-                 (productName && p.productName && p.productName.includes(productName)) ||
-                 (p.productName && productName && productName.includes(p.productName));
-        });
-        
-        if (matchedProduct) {
-          barcodeMap[barcode] = matchedProduct.productCode;
-        }
-      }
-    }
-    
-    console.log(`${Object.keys(barcodeMap).length}개 바코드 매핑 생성`);
-    
-    // 캐시 저장 (1시간)
-    setCache(cacheKey, barcodeMap, 3600);
-    
-    return barcodeMap;
-    
-  } catch (error) {
-    console.error('바코드 매핑 생성 실패:', error);
-    return {};
-  }
-}
-
-/**
- * Platform API에서 모든 상품 가져오기
- * @returns {Array} 상품 배열
- */
-function getAllPlatformProducts() {
-  try {
-    const products = [];
-    let page = 1;
-    const limit = 1000;
-    
-    while (products.length < 10000) { // 최대 10000개
-      const result = callPlatformAPI(`pos/products?limit=${limit}&page=${page}`);
-      
-      if (!result.success || !result.data || result.data.length === 0) {
-        break;
-      }
-      
-      products.push(...result.data);
-      
-      if (result.data.length < limit) {
-        break;
-      }
-      
-      page++;
-      Utilities.sleep(100); // API 제한 방지
-    }
-    
-    console.log(`총 ${products.length}개 Platform 상품 가져옴`);
-    return products;
-    
-  } catch (error) {
-    console.error('Platform 상품 조회 실패:', error);
-    return [];
-  }
-}
-
 // ===== smaregiPlatformAPI.gs - 필수 함수들 =====
 
 // getCurrentConfig 함수 - Platform API 설정 가져오기
@@ -408,182 +312,72 @@ function testPlatformConnection() {
   }
 }
 
-// productId から productCode を取得するヘルパー関数
-function getProductCodeById(productId) {
-  try {
-    // キャッシュチェック
-    const cacheKey = `product_${productId}`;
-    const cached = getCache(cacheKey);
-    if (cached) {
-      return cached.productCode;
-    }
-    
-    // 個別商品取得
-    const result = callPlatformAPI(`pos/products/${productId}`);
-    
-    if (result.success && result.data) {
-      // キャッシュ保存
-      setCache(cacheKey, {
-        productCode: result.data.productCode,
-        productName: result.data.productName
-      }, 3600); // 1時間
-      
-      return result.data.productCode;
-    }
-    
-    return null;
-    
-  } catch (error) {
-    console.error(`商品コード取得エラー (ID: ${productId}):`, error);
-    return null;
-  }
-}
-
-// getPlatformStockDataOptimized 함수 전체 교체
+// getPlatformStockDataOptimized 자리에 이 함수 추가
 function getPlatformStockDataOptimized(storeId = null) {
   try {
-    console.log('=== 최적화된 재고 데이터 취득 ===');
+    console.log('=== 재고 데이터 조회 (간단 버전) ===');
     
-    // 캐시 확인 (30분)
-    const cacheKey = `platform_stock_data_${storeId || 'all'}`;
+    const cacheKey = `stock_simple_${storeId || 'all'}`;
     const cached = getCache(cacheKey);
     if (cached) {
-      console.log('캐시에서 재고 데이터 반환');
+      console.log('캐시된 재고 데이터 사용');
       return cached;
     }
     
-    const stockData = {};
-    let totalStock = 0;
-    let page = 1;
-    const limit = 1000; // 한 번에 1000개씩 가져오기 (기존 100개에서 증가)
-    
-    // 상품 맵을 먼저 가져오기 (캐시됨)
-    const productMap = getAllProductsMap();
-    
-    // 재고 정보 가져오기 - 제한 없이 모든 데이터 가져오기
-    while (true) { // 제한 제거 (기존: totalStock < 700)
-      let endpoint = `pos/stock?limit=${limit}&page=${page}`;
-      if (storeId) {
-        endpoint += `&store_id=${storeId}`;
+    if (!storeId) {
+      const stores = getPlatformStores();
+      if (stores && stores.length > 0) {
+        storeId = stores[0].storeId;
       }
-      
+    }
+    
+    const stockMap = {};
+    let page = 1;
+    const limit = 1000;
+    
+    // 재고 데이터 직접 조회 (바코드를 productCode로 사용)
+    while (page <= 3) { // 최대 3페이지만
+      const endpoint = `pos/stock?store_id=${storeId}&limit=${limit}&page=${page}`;
       const result = callPlatformAPI(endpoint);
       
       if (!result.success || !result.data || result.data.length === 0) {
         break;
       }
       
-      // 재고 데이터 처리
-      result.data.forEach(item => {
-        const productId = item.productId;
-        const productInfo = Object.values(productMap).find(p => p.productId === productId);
-        const productCode = productInfo ? productInfo.productCode : '';
-        
-        if (productCode) {
-          stockData[productCode] = {
-            quantity: parseInt(item.stockAmount) || 0,
-            layawayQuantity: parseInt(item.layawayStockAmount) || 0,
-            availableQuantity: (parseInt(item.stockAmount) || 0) - (parseInt(item.layawayStockAmount) || 0),
-            productName: productInfo ? productInfo.productName : '',
-            productCode: productCode,
-            storeId: item.storeId,
-            updatedAt: item.updDateTime
+      // productCode를 바코드로 직접 사용하는 간단한 방식
+      result.data.forEach(stock => {
+        // productId가 우리 바코드 형식(10자리)이면 직접 사용
+        if (/^\d{10}$/.test(stock.productId)) {
+          stockMap[stock.productId] = {
+            quantity: parseInt(stock.stockAmount) || 0,
+            layawayQuantity: parseInt(stock.layawayStockAmount) || 0,
+            availableQuantity: (parseInt(stock.stockAmount) || 0) - (parseInt(stock.layawayStockAmount) || 0),
+            storeId: stock.storeId,
+            updatedAt: stock.updDateTime
           };
-          totalStock++;
         }
       });
       
-      console.log(`페이지 ${page}: ${result.data.length}개 재고 처리 (누적: ${totalStock}개)`);
-      
-      // 다음 페이지 없으면 종료
-      if (result.data.length < limit) {
-        break;
-      }
-      
+      if (result.data.length < limit) break;
       page++;
-      
-      // API 제한 방지를 위한 짧은 대기
-      Utilities.sleep(100);
     }
     
-    console.log(`총 ${totalStock}개 재고 데이터 취득 완료`);
+    console.log(`${Object.keys(stockMap).length}개 재고 데이터 수집`);
     
     const resultData = {
       success: true,
-      data: stockData,
-      count: totalStock,
+      data: stockMap,
+      count: Object.keys(stockMap).length,
       storeId: storeId,
       timestamp: new Date().toISOString()
     };
     
-    // 캐시 저장 (30분)
     setCache(cacheKey, resultData, 1800);
-    
     return resultData;
     
   } catch (error) {
-    console.error('재고 데이터 취득 에러:', error);
-    return {
-      success: false,
-      error: error.toString()
-    };
-  }
-}
-
-// getAllProductsMap 함수 최적화
-function getAllProductsMap() {
-  try {
-    // 캐시 확인 (1시간)
-    const cached = getCache('all_products_map');
-    if (cached) {
-      console.log('캐시에서 상품 맵 가져옴');
-      return cached;
-    }
-    
-    console.log('전체 상품 정보 가져오는 중...');
-    const productMap = {};
-    let page = 1;
-    const limit = 1000; // 한 번에 많이 가져오기
-    let totalProducts = 0;
-    
-    while (true) { // 제한 제거 (기존: totalProducts < 1000)
-      const result = callPlatformAPI(`pos/products?limit=${limit}&page=${page}`);
-      
-      if (!result.success || !result.data || result.data.length === 0) {
-        break;
-      }
-      
-      result.data.forEach(product => {
-        productMap[product.productCode] = {
-          productId: product.productId,
-          productName: product.productName,
-          productCode: product.productCode
-        };
-        totalProducts++;
-      });
-      
-      console.log(`페이지 ${page}: ${result.data.length}개 상품 처리 (누적: ${totalProducts}개)`);
-      
-      if (result.data.length < limit) {
-        break;
-      }
-      
-      page++;
-      
-      // API 제한 방지
-      Utilities.sleep(100);
-    }
-    
-    console.log(`총 ${totalProducts}개 상품 매핑 생성 완료`);
-    
-    // 캐시 저장 (1시간)
-    setCache('all_products_map', productMap, 3600);
-    
-    return productMap;
-    
-  } catch (error) {
-    console.error('상품 맵 생성 에러:', error);
-    return {};
+    console.error('재고 조회 실패:', error);
+    return { success: false, error: error.toString() };
   }
 }
 
