@@ -2705,6 +2705,7 @@ function resetOrderBoxNumber(orderId) {
 }
 
 // 내보내기 완료된 항목 조회
+// 내보내기 완료된 항목 조회
 function getExportedItems(orderId) {
   try {
     if (!orderId) {
@@ -2752,6 +2753,13 @@ function getExportedItems(orderId) {
           
           // 남은 수량이 있는 항목만 추가
           if (remainingQuantity > 0) {
+            // 내보내기 시간이 있으면 exportStatus 생성
+            let exportStatus = '';
+            if (row[13]) { // N열에 값이 있으면
+              const exportTimeStr = String(row[13]);
+              exportStatus = `내보내기 완료 (${exportTimeStr})`;
+            }
+            
             const item = {
               rowIndex: i + 7,
               barcode: String(row[0]),
@@ -2770,13 +2778,54 @@ function getExportedItems(orderId) {
               csvConfirmed: row[14] === '✓',
               boxNumbers: boxNumbers,
               scannedQuantity: scannedQuantity,
-              remainingQuantity: remainingQuantity
+              remainingQuantity: remainingQuantity,
+              
+              // 추가 필드들
+              exportStatus: exportStatus,
+              confirmedStatus: row[9] === '확정', // 확정 여부 별도 플래그
+              
+              // 출고 완료 여부 계산 (박스번호 기반)
+              isFullyShipped: (() => {
+                if (!boxNumbers) return false;
+                let totalShipped = 0;
+                const matches = boxNumbers.match(/\d+\((\d+)\)/g);
+                if (matches) {
+                  matches.forEach(match => {
+                    const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+                    totalShipped += qty;
+                  });
+                }
+                return totalShipped >= exportQuantity;
+              })(),
+              
+              // 부분 출고 정보
+              shippingInfo: (() => {
+                if (!boxNumbers) return null;
+                let totalShipped = 0;
+                const boxDetails = [];
+                const matches = boxNumbers.match(/\d+\((\d+)\)/g);
+                if (matches) {
+                  matches.forEach(match => {
+                    const boxNum = match.match(/(\d+)\(/)[1];
+                    const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+                    totalShipped += qty;
+                    boxDetails.push({ boxNumber: boxNum, quantity: qty });
+                  });
+                }
+                return {
+                  totalShipped: totalShipped,
+                  exportableQty: exportQuantity,
+                  isPartial: totalShipped > 0 && totalShipped < exportQuantity,
+                  isComplete: totalShipped >= exportQuantity,
+                  boxDetails: boxDetails
+                };
+              })()
             };
             
             items.push(item);
           } else {
-            // 출고 완료 상태 업데이트
-            if (row[9] !== '출고완료') {
+            // 출고 완료 상태 업데이트 (기존 상태가 '확정'이면 유지)
+            if (row[9] !== '출고완료' && row[9] !== '확정') {
               sheet.getRange(i + 7, 10).setValue('출고완료');
             }
           }
@@ -3158,7 +3207,10 @@ function syncWithPackingList(spreadsheet, orderSheet) {
         const requestedQty = orderData[rowIndex][16] || orderData[rowIndex][3];
         
         if (totalShipped >= requestedQty && requestedQty > 0) {
-          if (orderData[rowIndex][9] !== '출고완료') {
+          // 기존 상태가 '확정'이면 유지, 아니면 '출고완료'로 변경
+          if (orderData[rowIndex][9] === '확정') {
+            // 확정 상태는 유지 (출고 완료는 박스번호로 확인)
+          } else if (orderData[rowIndex][9] !== '출고완료') {
             orderData[rowIndex][9] = '출고완료';
           }
         }
