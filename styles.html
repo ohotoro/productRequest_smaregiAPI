@@ -137,7 +137,8 @@ body {
 }
 
 .btn-danger:hover {
-    background: #c0392b
+    background: #c0392b;
+    transform: translateY(-1px);
 }
 
 .btn-success:hover {
@@ -1445,6 +1446,15 @@ body {
     animation: spin 1s linear infinite;
 }
 
+.spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid #e9ecef;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
 @keyframes spin {
     0% {
         transform: rotate(0deg);
@@ -1641,7 +1651,7 @@ button .loading-spinner-small {
 }
 
 .issue-indicator:hover {
-  transform: scale(1.2);
+    transform: scale(1.2);
 }
 
 .save-indicator.pending {
@@ -2610,15 +2620,6 @@ button .loading-spinner-small {
     gap: 8px;
     margin-bottom: 16px;
     flex-wrap: wrap
-}
-
-.barcode {
-    font-size: 13px;
-    font-family: monospace;
-    background: #f5f5f5;
-    padding: 4px 8px;
-    border-radius: 4px;
-    color: #666
 }
 
 .option {
@@ -4070,15 +4071,15 @@ order-bottom: 1px solid #e9ecef;
 }
 
 .stock-badge.loading {
-  background: #f5f5f5;
-  color: #666;
-  border-color: #e0e0e0;
-  animation: pulse 1.5s ease-in-out infinite;
+    background: #f5f5f5;
+    color: #666;
+    border-color: #e0e0e0;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .stock-badge.loading .stock-icon {
-  animation: spin 1s linear infinite;
-  font-size: 11px;
+    animation: spin 1s linear infinite;
+    font-size: 11px;
 }
 
 .stock-badge.loading .stock-text::after {
@@ -6089,10 +6090,10 @@ body.sticky-footer-active {
     display: inline-block;
 }
 
-.status-badge {
-    padding: 4px 12px;
-    border-radius: 20px;
+.stock-status {
     font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
     font-weight: 500;
 }
 
@@ -6160,6 +6161,10 @@ body.sticky-footer-active {
     padding: 60px 20px;
     color: #6c757d;
     font-size: 16px;
+}
+
+.empty-message.error {
+    color: #dc3545;
 }
 
 .setup-prompt {
@@ -6417,6 +6422,39 @@ body.sticky-footer-active {
     .quantity-display {
         font-size: 20px;
     }
+
+    .view-mode-toggle {
+        flex-direction: column;
+    }
+
+    .toggle-btn {
+        width: 100%;
+    }
+
+    .completed-item-row {
+        flex-wrap: wrap;
+        padding: 10px;
+    }
+
+    .item-main-info {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+
+    .item-box-info,
+    .item-quantity-info {
+        width: 50%;
+        min-width: auto;
+    }
+
+    .item-box-info {
+        text-align: left;
+    }
+
+    .completed-summary {
+        flex-wrap: wrap;
+        font-size: 13px;
+    }
 }
 
 /* 클릭 유도 스타일 추가 */
@@ -6450,11 +6488,18 @@ body.sticky-footer-active {
     display: flex;
     gap: 8px;
     margin-left: auto;
+    flex-wrap: wrap;
 }
 
 .packing-list-buttons .btn {
     font-size: 13px;
     padding: 6px 12px;
+    white-space: nowrap;
+}
+
+.packing-list-buttons button {
+    font-size: 13px;
+    padding: 5px 12px;
     white-space: nowrap;
 }
 
@@ -7564,20 +7609,20 @@ body.sticky-footer-active {
 
 /* 판매 배지 로딩 상태 */
 .badge-sales.sales-loading {
-  background: #f5f5f5;
-  color: #666;
-  border-color: #e0e0e0;
-  animation: pulse 1.5s ease-in-out infinite;
+    background: #f5f5f5;
+    color: #666;
+    border-color: #e0e0e0;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
 .badge-sales.sales-loading .sales-icon {
-  animation: spin 1s linear infinite;
-  font-size: 11px;
+    animation: spin 1s linear infinite;
+    font-size: 11px;
 }
 
 .badge-sales.sales-loading .sales-text {
-  font-style: italic;
-  opacity: 0.8;
+    font-style: italic;
+    opacity: 0.8;
 }
 
 @keyframes spin {
@@ -7589,5 +7634,165 @@ body.sticky-footer-active {
         transform: rotate(360deg);
     }
 }
+
+/* 뷰 모드 토글 개선 */
+.view-mode-toggle {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.toggle-btn {
+    flex: 1;
+    padding: 10px 20px;
+    border: 1px solid #dee2e6;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.toggle-btn:hover {
+    background: #e9ecef;
+}
+
+.toggle-btn.active {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+/* 출고 완료 헤더 */
+.completed-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.completed-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #495057;
+}
+
+.summary-item {
+    font-weight: 500;
+}
+
+.summary-divider {
+    color: #dee2e6;
+}
+
+/* 출고 완료 아이템 - 심플한 한줄 표시 */
+.completed-item-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    border-bottom: 1px solid #f0f0f0;
+    background: white;
+    transition: background 0.1s ease;
+}
+
+.completed-item-row:hover {
+    background: #f8f9fa;
+}
+
+.completed-item-row:first-child {
+    border-top: 1px solid #f0f0f0;
+}
+
+/* 메인 정보 영역 */
+.item-main-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.item-name-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.item-name-line strong {
+    font-size: 14px;
+    color: #212529;
+}
+
+.barcode {
+    font-size: 12px;
+    color: #adb5bd;
+    font-family: monospace;
+}
+
+.item-option-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+/* 박스 정보 */
+.item-box-info {
+    min-width: 150px;
+    text-align: center;
+}
+
+.box-numbers {
+    font-size: 13px;
+    color: #495057;
+    background: #e9ecef;
+    padding: 4px 12px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+/* 수량 정보 */
+.item-quantity-info {
+    min-width: 120px;
+    text-align: right;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.quantity {
+    font-weight: 600;
+    color: #28a745;
+    font-size: 14px;
+}
+
+.status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.status-available {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-partial {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.status-default {
+    background: #e2e3e5;
+    color: #383d41;
+}
+
 
 </style >
