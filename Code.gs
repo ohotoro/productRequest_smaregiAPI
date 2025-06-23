@@ -1,5 +1,6 @@
 // ===== 전역 설정 Code.gs ===== 
 
+
 // ===== 웹앱 진입점 =====
 function doGet() {
   const template = HtmlService.createTemplateFromFile('index');
@@ -37,128 +38,125 @@ function include(filename) {
 // ===== 초기 데이터 로드 (캐시 크기 문제 해결) =====
 function loadInitialProductsWithIssues() {
   try {
+    console.log('=== 초기 데이터 로드 시작 ===');
     const startTime = new Date();
-    console.log('loadInitialProductsWithIssues 시작');
     
-    // cacheManager의 getCache 사용
-    const cachedData = getCache(CACHE_KEYS.INITIAL_PRODUCTS);
+    // 기본 반환 구조
+    const defaultReturn = {
+      products: [],
+      productIssues: {},
+      cached: false,
+      loadTime: 0
+    };
     
-    if (cachedData && cachedData.timestamp) {
-      const age = (new Date() - new Date(cachedData.timestamp)) / 1000 / 60;
-      if (age < 30) {
-        console.log('캐시에서 데이터 로드');
+    // 스프레드시트 ID 확인
+    if (!CONFIG.PRODUCT_SHEET_ID) {
+      console.error('상품 시트 ID가 설정되지 않았습니다.');
+      return defaultReturn;
+    }
+    
+    // 캐시 확인
+    try {
+      const cached = getCache(CACHE_KEYS.INITIAL_PRODUCTS);
+      if (cached && cached.products && Array.isArray(cached.products)) {
+        console.log(`캐시에서 ${cached.products.length}개 상품 반환`);
         return {
-          products: cachedData.products || [],
-          productIssues: cachedData.productIssues || {},
+          products: cached.products,
+          productIssues: cached.productIssues || {},
           cached: true,
           loadTime: new Date() - startTime
         };
       }
+    } catch (cacheError) {
+      console.warn('캐시 조회 실패:', cacheError);
     }
     
     // 타임아웃 설정 (30초)
-    const maxExecutionTime = 30000;
-    const timeoutTime = startTime.getTime() + maxExecutionTime;
+    const timeoutTime = startTime.getTime() + 30000;
     
-    // 병렬로 데이터 수집
+    // 1. 자주 발주 바코드
     let frequentBarcodes = [];
-    let recentProducts = [];
-    let sharedRecent = [];
-    let productIssues = {};
-    
-    // 1. 자주 발주 바코드 (상위 80개만)
     try {
-      console.log('자주 발주 바코드 로드 시작');
-      frequentBarcodes = getCachedFrequentBarcodes().slice(0, 80);
-      console.log(`자주 발주 바코드 ${frequentBarcodes.length}개 로드 완료`);
-      
-      if (new Date().getTime() > timeoutTime) {
-        throw new Error('타임아웃: 자주 발주 바코드 로드');
-      }
+      frequentBarcodes = getCachedFrequentBarcodes() || [];
+      console.log(`자주 발주 바코드 ${frequentBarcodes.length}개 로드`);
     } catch (e) {
       console.error('자주 발주 바코드 로드 실패:', e);
-      frequentBarcodes = [];
     }
     
-    // 2. 최근 추가 상품 (50개)
+    // 2. 최근 추가 상품
+    let recentProducts = [];
     try {
-      console.log('최근 추가 상품 로드 시작');
-      recentProducts = getRecentProducts(50);
-      console.log(`최근 추가 상품 ${recentProducts.length}개 로드 완료`);
-      
-      if (new Date().getTime() > timeoutTime) {
-        throw new Error('타임아웃: 최근 추가 상품 로드');
-      }
+      recentProducts = getRecentProducts(50) || [];
+      console.log(`최근 추가 상품 ${recentProducts.length}개 로드`);
     } catch (e) {
       console.error('최근 추가 상품 로드 실패:', e);
-      recentProducts = [];
     }
     
-    // 3. 공유 최근 상품 (20개)
+    // 3. 공유 최근 상품
+    let sharedRecent = [];
     try {
-      console.log('공유 최근 상품 로드 시작');
-      sharedRecent = getSharedRecentProducts().slice(0, 20);
-      console.log(`공유 최근 상품 ${sharedRecent.length}개 로드 완료`);
-      
-      if (new Date().getTime() > timeoutTime) {
-        throw new Error('타임아웃: 공유 최근 상품 로드');
-      }
+      sharedRecent = getSharedRecentProducts().slice(0, 20) || [];
+      console.log(`공유 최근 상품 ${sharedRecent.length}개 로드`);
     } catch (e) {
       console.error('공유 최근 상품 로드 실패:', e);
-      sharedRecent = [];
     }
     
     // 4. 제품 이슈사항
+    let productIssues = {};
     try {
-      console.log('제품 이슈사항 로드 시작');
-      productIssues = loadProductIssues();
-      console.log(`제품 이슈사항 ${Object.keys(productIssues).length}개 로드 완료`);
+      productIssues = loadProductIssues() || {};
+      console.log(`제품 이슈사항 ${Object.keys(productIssues).length}개 로드`);
     } catch (e) {
       console.error('제품 이슈사항 로드 실패:', e);
-      productIssues = {};
     }
     
     // 중복 제거 및 병합
     const productMap = new Map();
     
-    // 우선순위대로 추가
-    sharedRecent.forEach(p => {
-      if (p && p.barcode) {
-        p.isSharedRecent = true;
-        p.priority = 1;
-        productMap.set(p.barcode, p);
-      }
-    });
+    // 공유 최근 상품 추가
+    if (Array.isArray(sharedRecent)) {
+      sharedRecent.forEach(p => {
+        if (p && p.barcode) {
+          p.isSharedRecent = true;
+          p.priority = 1;
+          productMap.set(p.barcode, p);
+        }
+      });
+    }
     
     // 자주 발주 상품 정보 가져오기
     if (frequentBarcodes.length > 0) {
       try {
-        const frequentProducts = getProductsByBarcodes(frequentBarcodes);
-        frequentProducts.forEach(p => {
-          if (p && p.barcode) {
-            if (!productMap.has(p.barcode)) {
-              productMap.set(p.barcode, p);
+        const frequentProducts = getProductsByBarcodes(frequentBarcodes) || [];
+        if (Array.isArray(frequentProducts)) {
+          frequentProducts.forEach(p => {
+            if (p && p.barcode) {
+              if (!productMap.has(p.barcode)) {
+                productMap.set(p.barcode, p);
+              }
+              const existing = productMap.get(p.barcode);
+              existing.isFrequent = true;
+              existing.priority = Math.min(existing.priority || 999, 2);
             }
-            const existing = productMap.get(p.barcode);
-            existing.isFrequent = true;
-            existing.priority = Math.min(existing.priority || 999, 2);
-          }
-        });
+          });
+        }
       } catch (e) {
         console.error('자주 발주 상품 정보 로드 실패:', e);
       }
     }
     
     // 최근 추가 상품
-    recentProducts.forEach(p => {
-      if (p && p.barcode) {
-        if (!productMap.has(p.barcode)) {
-          productMap.set(p.barcode, p);
+    if (Array.isArray(recentProducts)) {
+      recentProducts.forEach(p => {
+        if (p && p.barcode) {
+          if (!productMap.has(p.barcode)) {
+            productMap.set(p.barcode, p);
+          }
+          const existing = productMap.get(p.barcode);
+          existing.isRecent = p.isRecent;
         }
-        const existing = productMap.get(p.barcode);
-        existing.isRecent = p.isRecent;
-      }
-    });
+      });
+    }
     
     // 이슈 정보 병합
     productMap.forEach((product, barcode) => {
@@ -172,7 +170,7 @@ function loadInitialProductsWithIssues() {
       .sort((a, b) => (a.priority || 999) - (b.priority || 999))
       .slice(0, 100); // 100개로 제한
     
-    // cacheManager의 setCache 사용
+    // 캐시 저장 시도
     try {
       const dataToCache = {
         products: products,
@@ -196,12 +194,14 @@ function loadInitialProductsWithIssues() {
     
   } catch (error) {
     console.error('통합 데이터 로드 실패:', error);
+    
+    // 오류가 발생해도 기본 구조는 반환
     return {
       products: [],
       productIssues: {},
       error: error.toString(),
       cached: false,
-      loadTime: new Date() - startTime
+      loadTime: 0
     };
   }
 }
@@ -1182,6 +1182,9 @@ function getSettings() {
   // 음성 설정 추가
   const voiceSettings = getVoiceSettings();
   
+  // 박스 바코드는 스프레드시트에서 가져오기
+  const boxBarcodes = getBoxBarcodesFromSheet();
+  
   return {
     productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
     orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
@@ -1193,10 +1196,16 @@ function getSettings() {
     suggestStock20: settings.suggestStock20 || '10',
     boxMode: settings.boxMode || 'barcode',
     boxDigits: settings.boxDigits || '3',
-    boxBarcodes: getBoxBarcodesFromSheet(),
+    boxBarcodes: boxBarcodes, // 스프레드시트에서 가져온 데이터
     maxLowStockDisplay: settings.maxLowStockDisplay || '50',
     // 음성 설정 추가
-    voiceSettings: voiceSettings
+    voiceSettings: voiceSettings,
+    // 판매 기간 설정 추가
+    salesPeriodShort: settings.salesPeriodShort || '7',
+    salesPeriodLong: settings.salesPeriodLong || '30',
+    salesThresholdHot: settings.salesThresholdHot || '20',
+    salesThresholdPopular: settings.salesThresholdPopular || '10',
+    salesThresholdNormal: settings.salesThresholdNormal || '5'
   };
 }
 
@@ -1300,6 +1309,23 @@ function updateSettings(newSettings) {
       if (!voiceResult.success) {
         return voiceResult;
       }
+    }
+
+    // 판매 기간 설정 추가
+    if (newSettings.salesPeriodShort) {
+      userProperties.setProperty('salesPeriodShort', newSettings.salesPeriodShort);
+    }
+    if (newSettings.salesPeriodLong) {
+      userProperties.setProperty('salesPeriodLong', newSettings.salesPeriodLong);
+    }
+    if (newSettings.salesThresholdHot) {
+      userProperties.setProperty('salesThresholdHot', newSettings.salesThresholdHot);
+    }
+    if (newSettings.salesThresholdPopular) {
+      userProperties.setProperty('salesThresholdPopular', newSettings.salesThresholdPopular);
+    }
+    if (newSettings.salesThresholdNormal) {
+      userProperties.setProperty('salesThresholdNormal', newSettings.salesThresholdNormal);
     }
     
     return { success: true, message: '설정이 저장되었습니다.' };
@@ -2680,11 +2706,8 @@ function resetOrderBoxNumber(orderId) {
 
 // 내보내기 완료된 항목 조회
 function getExportedItems(orderId) {
-  console.log('getExportedItems 호출됨, orderId:', orderId);
-  
   try {
     if (!orderId) {
-      console.error('orderId가 없습니다');
       return { success: false, message: '발주서 ID가 없습니다.', items: [] };
     }
     
@@ -2692,24 +2715,22 @@ function getExportedItems(orderId) {
     const sheet = ss.getSheetByName('발주서');
     
     if (!sheet) {
-      console.error('발주서 시트를 찾을 수 없습니다');
       return { success: false, message: '발주서 시트를 찾을 수 없습니다.', items: [] };
     }
     
+    // 먼저 패킹리스트와 동기화
+    syncWithPackingList(ss, sheet);
+    
     const items = [];
     const lastRow = sheet.getLastRow();
-    console.log('lastRow:', lastRow);
     
     if (lastRow > 6) {
       const numRows = lastRow - 6;
-      // Q열(17열)까지 읽기
       const data = sheet.getRange(7, 1, numRows, 17).getValues();
-      console.log('데이터 행 수:', data.length);
       
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
         
-        // 내보내기 시간이 있는 항목만 (N열 - 인덱스 13)
         if (row[13] && row[0]) { // exportedAt && barcode
           const boxNumbers = row[15] || ''; // P열: 박스번호
           const exportableQty = row[16] || 0; // Q열: 출고가능수량
@@ -2717,7 +2738,6 @@ function getExportedItems(orderId) {
           // 박스번호에서 스캔 수량 계산
           let scannedQuantity = 0;
           if (boxNumbers) {
-            // "001(10), 002(5)" 형식 파싱
             const matches = boxNumbers.match(/\d+\((\d+)\)/g);
             if (matches) {
               matches.forEach(match => {
@@ -2727,68 +2747,60 @@ function getExportedItems(orderId) {
             }
           }
           
-          // 출고가능수량 사용 (Q열 값이 있으면 사용, 없으면 원래 요청 수량 사용)
           const exportQuantity = exportableQty > 0 ? Number(exportableQty) : Number(row[3]);
+          const remainingQuantity = exportQuantity - scannedQuantity;
           
-          const item = {
-            rowIndex: i + 7, // 실제 행 번호
-            barcode: String(row[0]),
-            name: String(row[1] || ''),
-            option: String(row[2] || ''),
-            quantity: exportQuantity, // 출고가능수량으로 변경
-            originalQuantity: Number(row[3]) || 0, // 원래 요청 수량
-            purchasePrice: Number(row[4]) || 0,
-            weight: String(row[6] || ''),
-            priority: Number(row[7]) || 3,
-            comment: String(row[8] || ''),
-            status: String(row[9] || ''),
-            stockAvailable: String(row[11] || ''),
-            supplierName: String(row[12] || ''),
-            exportedAt: String(row[13]),
-            csvConfirmed: row[14] === '✓',
-            boxNumbers: boxNumbers,
-            scannedQuantity: scannedQuantity,
-            remainingQuantity: exportQuantity - scannedQuantity // 출고가능수량 기준으로 계산
-          };
-          
-          // 품절/오더중은 이미 Q열에서 0으로 처리되므로 추가 필터링 불필요
-          if (exportQuantity > 0) {
+          // 남은 수량이 있는 항목만 추가
+          if (remainingQuantity > 0) {
+            const item = {
+              rowIndex: i + 7,
+              barcode: String(row[0]),
+              name: String(row[1] || ''),
+              option: String(row[2] || ''),
+              quantity: exportQuantity,
+              originalQuantity: Number(row[3]) || 0,
+              purchasePrice: Number(row[4]) || 0,
+              weight: String(row[6] || ''),
+              priority: Number(row[7]) || 3,
+              comment: String(row[8] || ''),
+              status: String(row[9] || ''),
+              stockAvailable: String(row[11] || ''),
+              supplierName: String(row[12] || ''),
+              exportedAt: String(row[13]),
+              csvConfirmed: row[14] === '✓',
+              boxNumbers: boxNumbers,
+              scannedQuantity: scannedQuantity,
+              remainingQuantity: remainingQuantity
+            };
+            
             items.push(item);
-            console.log('추가된 항목:', item.barcode, item.name, '출고가능수량:', exportQuantity);
           } else {
-            console.log('제외된 항목 (출고불가):', item.barcode, item.stockAvailable);
+            // 출고 완료 상태 업데이트
+            if (row[9] !== '출고완료') {
+              sheet.getRange(i + 7, 10).setValue('출고완료');
+            }
           }
         }
       }
     }
     
-    console.log('내보내기된 총 항목 수:', items.length);
-    
     // 발주서별 현재 박스번호 가져오기
     let currentBoxNumber = 1;
     try {
       currentBoxNumber = getOrderBoxNumber(orderId);
-      console.log('현재 박스번호:', currentBoxNumber);
     } catch (e) {
-      console.warn('박스번호 조회 실패, 기본값 사용:', e);
+      // 무시
     }
     
-    // 반드시 객체를 반환하도록 보장
-    const result = { 
+    return { 
       success: true, 
       items: items || [],
       currentBoxNumber: currentBoxNumber || 1,
       message: `${items.length}개 항목을 로드했습니다.`
     };
     
-    console.log('반환할 결과:', JSON.stringify(result));
-    return result;
-    
   } catch (error) {
     console.error('내보내기 항목 조회 실패:', error);
-    console.error('에러 스택:', error.stack);
-    
-    // 에러가 발생해도 반드시 객체를 반환
     return { 
       success: false, 
       message: error.toString(),
@@ -2814,7 +2826,13 @@ function isBoxIdentifier(identifier) {
 
 // 출고 데이터 저장
 function saveShippingData(orderId, shippingData) {
+  const lockService = LockService.getScriptLock();
+  
   try {
+    if (!lockService.tryLock(5000)) {
+      throw new Error('다른 사용자가 저장 중입니다. 잠시 후 다시 시도해주세요.');
+    }
+    
     const ss = SpreadsheetApp.openById(orderId);
     const sheet = ss.getSheetByName('발주서');
     
@@ -2822,38 +2840,119 @@ function saveShippingData(orderId, shippingData) {
       throw new Error('발주서 시트를 찾을 수 없습니다.');
     }
     
-    // 박스 번호만 사용 (박스 이름이 아닌)
-    const boxNumber = shippingData.boxName.match(/(\d+)번/)?.[1] || 
-                     ShippingState.currentBox.number || 
-                     shippingData.boxName;
+    // 박스 번호 정규화
+    let boxNumber = null;
+    if (shippingData.boxName) {
+      const extracted = shippingData.boxName.match(/\d+/);
+      if (extracted) {
+        boxNumber = parseInt(extracted[0]).toString();
+      }
+    }
     
-    // 각 항목의 박스정보 업데이트
+    if (!boxNumber) {
+      throw new Error('박스 번호를 확인할 수 없습니다.');
+    }
+    
+    // 트랜잭션 시작
+    const batchUpdates = {
+      orderUpdates: [],
+      historyData: [],
+      packingData: []
+    };
+    
+    // 1. 발주서 업데이트 준비
     shippingData.items.forEach(item => {
       const rowIndex = item.rowIndex;
       const currentBoxNumbers = sheet.getRange(rowIndex, 16).getValue() || '';
       
-      // 박스 번호만 사용하도록 수정
-      const newBoxInfo = `${boxNumber}(${item.scannedInThisBox})`;
-      const updatedBoxNumbers = currentBoxNumbers ? 
-        `${currentBoxNumbers}, ${newBoxInfo}` : 
-        newBoxInfo;
-      
-      sheet.getRange(rowIndex, 16).setValue(updatedBoxNumbers);
-      
-      if (item.remainingQuantity === 0) {
-        sheet.getRange(rowIndex, 10).setValue('출고완료');
+      // 기존 박스 정보 파싱 및 정규화
+      let existingBoxMap = {};
+      if (currentBoxNumbers) {
+        const matches = currentBoxNumbers.match(/(\d+)\((\d+)\)/g);
+        if (matches) {
+          matches.forEach(match => {
+            const [, box, qty] = match.match(/(\d+)\((\d+)\)/);
+            const normalizedBox = parseInt(box).toString();
+            existingBoxMap[normalizedBox] = (existingBoxMap[normalizedBox] || 0) + parseInt(qty);
+          });
+        }
       }
+      
+      // 현재 박스 추가
+      existingBoxMap[boxNumber] = (existingBoxMap[boxNumber] || 0) + item.scannedInThisBox;
+      
+      // 박스 정보 재구성
+      const updatedBoxNumbers = Object.entries(existingBoxMap)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([box, qty]) => `${box}(${qty})`)
+        .join(', ');
+      
+      batchUpdates.orderUpdates.push({
+        rowIndex: rowIndex,
+        boxNumbers: updatedBoxNumbers,
+        status: item.remainingQuantity === 0 ? '출고완료' : sheet.getRange(rowIndex, 10).getValue()
+      });
     });
     
-    // 출고 이력 저장 - 박스 번호만 전달
-    saveShippingHistory(ss, shippingData, boxNumber);
+    // 2. 출고이력 데이터 준비
+    const timestamp = new Date();
+    const user = Session.getActiveUser().getEmail();
     
-    // 패킹리스트 자동 업데이트 - 박스 번호만 전달
-    updatePackingListAuto(ss, shippingData, boxNumber);
+    batchUpdates.historyData = shippingData.items.map(item => [
+      timestamp,
+      boxNumber,
+      item.barcode,
+      item.name,
+      item.option || '',
+      item.scannedInThisBox,
+      user
+    ]);
+    
+    // 3. 패킹리스트 데이터 준비
+    batchUpdates.packingData = shippingData.items.map(item => ({
+      barcode: item.barcode,
+      name: item.name,
+      option: item.option || '',
+      quantity: item.scannedInThisBox,
+      boxNumber: boxNumber,
+      comment: item.comment || '',
+      stockAvailable: item.stockAvailable || '',
+      timestamp: timestamp
+    }));
+    
+    // 4. 배치 실행
+    if (batchUpdates.orderUpdates.length > 0) {
+      batchUpdates.orderUpdates.forEach(update => {
+        sheet.getRange(update.rowIndex, 16).setValue(update.boxNumbers);
+        if (update.status === '출고완료') {
+          sheet.getRange(update.rowIndex, 10).setValue(update.status);
+        }
+      });
+    }
+    
+    // 출고이력 저장
+    let historySheet = ss.getSheetByName('출고이력');
+    if (!historySheet) {
+      historySheet = ss.insertSheet('출고이력');
+      const headers = ['출고일시', '박스번호', '바코드', '상품명', '옵션', '수량', '담당자'];
+      historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      historySheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    }
+    
+    if (batchUpdates.historyData.length > 0) {
+      const lastRow = historySheet.getLastRow();
+      historySheet.getRange(lastRow + 1, 1, batchUpdates.historyData.length, 7)
+        .setValues(batchUpdates.historyData);
+    }
+    
+    // 패킹리스트 업데이트
+    updatePackingListWithBatch(ss, batchUpdates.packingData);
     
     return {
       success: true,
-      message: `${boxNumber}번 박스 출고 완료`
+      message: `${boxNumber}번 박스 출고 완료`,
+      boxNumber: boxNumber,
+      savedItems: batchUpdates.orderUpdates.length
     };
     
   } catch (error) {
@@ -2862,6 +2961,694 @@ function saveShippingData(orderId, shippingData) {
       success: false,
       message: error.toString()
     };
+  } finally {
+    lockService.releaseLock();
+  }
+}
+
+function updatePackingListWithBatch(spreadsheet, packingDataArray) {
+  try {
+    let packingSheet = spreadsheet.getSheetByName('패킹리스트');
+    
+    if (!packingSheet) {
+      packingSheet = spreadsheet.insertSheet('패킹리스트');
+      const headers = ['바코드', '상품명', '옵션', '수량', '박스번호', '메모', '비고', '스캔시간'];
+      packingSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      packingSheet.getRange(1, 1, 1, headers.length)
+        .setBackground('#f0f0f0')
+        .setFontWeight('bold');
+      
+      // 열 너비 조정
+      packingSheet.setColumnWidths(1, 8, [120, 200, 150, 60, 80, 150, 100, 150]);
+    }
+    
+    // 기존 데이터 로드
+    const lastRow = packingSheet.getLastRow();
+    const existingData = lastRow > 1 ? 
+      packingSheet.getRange(2, 1, lastRow - 1, 5).getValues() : [];
+    
+    // 기존 데이터 맵 생성 (정규화된 키 사용)
+    const existingMap = new Map();
+    existingData.forEach((row, index) => {
+      if (row[0] && row[4]) { // 바코드와 박스번호가 있는 경우만
+        const normalizedBox = parseInt(row[4]).toString();
+        const key = `${row[0]}-${normalizedBox}`;
+        existingMap.set(key, {
+          rowIndex: index + 2,
+          quantity: row[3]
+        });
+      }
+    });
+    
+    // 새 데이터 처리
+    const newRows = [];
+    const updates = [];
+    
+    packingDataArray.forEach(item => {
+      const key = `${item.barcode}-${item.boxNumber}`;
+      
+      if (existingMap.has(key)) {
+        // 기존 항목 업데이트 (수량 합산)
+        const existing = existingMap.get(key);
+        updates.push({
+          row: existing.rowIndex,
+          quantity: existing.quantity + item.quantity,
+          memo: item.comment,
+          stockAvailable: item.stockAvailable,
+          timestamp: item.timestamp
+        });
+      } else {
+        // 새 항목
+        newRows.push([
+          item.barcode,
+          item.name,
+          item.option,
+          item.quantity,
+          item.boxNumber,
+          item.comment,
+          item.stockAvailable,
+          item.timestamp
+        ]);
+      }
+    });
+    
+    // 업데이트 실행
+    if (updates.length > 0) {
+      updates.forEach(update => {
+        packingSheet.getRange(update.row, 4).setValue(update.quantity);
+        packingSheet.getRange(update.row, 6).setValue(update.memo);
+        packingSheet.getRange(update.row, 7).setValue(update.stockAvailable);
+        packingSheet.getRange(update.row, 8).setValue(update.timestamp);
+      });
+      console.log(`패킹리스트 ${updates.length}개 항목 업데이트`);
+    }
+    
+    // 새 항목 추가
+    if (newRows.length > 0) {
+      const startRow = packingSheet.getLastRow() + 1;
+      packingSheet.getRange(startRow, 1, newRows.length, 8).setValues(newRows);
+      console.log(`패킹리스트 ${newRows.length}개 항목 추가`);
+    }
+    
+    // 최종 업데이트 시간 기록
+    packingSheet.getRange(1, 9).setValue('최종 업데이트:');
+    packingSheet.getRange(1, 10).setValue(new Date());
+    
+  } catch (error) {
+    console.error('패킹리스트 업데이트 실패:', error);
+    throw error; // 상위로 에러 전파
+  }
+}
+
+// syncWithPackingList 함수 로그 최소화
+function syncWithPackingList(spreadsheet, orderSheet) {
+  try {
+    const packingSheet = spreadsheet.getSheetByName('패킹리스트');
+    const historySheet = spreadsheet.getSheetByName('출고이력');
+    
+    const orderLastRow = orderSheet.getLastRow();
+    if (orderLastRow <= 6) return;
+    
+    const orderRange = orderSheet.getRange(7, 1, orderLastRow - 6, 17);
+    const orderData = orderRange.getValues();
+    
+    // 바코드 인덱스 맵 생성
+    const barcodeToRowIndex = {};
+    orderData.forEach((row, index) => {
+      if (row[0]) {
+        barcodeToRowIndex[row[0]] = index;
+      }
+    });
+    
+    // 1단계: 출고이력 데이터 수집
+    const masterShippingData = {};
+    
+    if (historySheet && historySheet.getLastRow() > 1) {
+      const historyData = historySheet.getRange(2, 1, historySheet.getLastRow() - 1, 7).getValues();
+      
+      historyData.forEach(row => {
+        const boxNumber = row[1] ? row[1].toString() : '';
+        const barcode = row[2];
+        const quantity = row[5];
+        
+        if (barcode && quantity && boxNumber) {
+          const normalizedBox = boxNumber.match(/\d+/);
+          if (normalizedBox) {
+            const boxNum = parseInt(normalizedBox[0]).toString();
+            
+            if (!masterShippingData[barcode]) {
+              masterShippingData[barcode] = {};
+            }
+            
+            masterShippingData[barcode][boxNum] = 
+              (masterShippingData[barcode][boxNum] || 0) + Number(quantity);
+          }
+        }
+      });
+    }
+    
+    // 2단계: 패킹리스트 데이터 보완
+    if (packingSheet && packingSheet.getLastRow() > 1) {
+      const packingData = packingSheet.getRange(2, 1, packingSheet.getLastRow() - 1, 5).getValues();
+      
+      packingData.forEach(row => {
+        const barcode = row[0];
+        const quantity = row[3];
+        const boxNumber = row[4] ? row[4].toString() : '';
+        
+        if (barcode && quantity && boxNumber) {
+          const normalizedBox = boxNumber.match(/\d+/);
+          if (normalizedBox) {
+            const boxNum = parseInt(normalizedBox[0]).toString();
+            
+            if (!masterShippingData[barcode]) {
+              masterShippingData[barcode] = {};
+            }
+            
+            if (!masterShippingData[barcode][boxNum]) {
+              masterShippingData[barcode][boxNum] = Number(quantity);
+            }
+          }
+        }
+      });
+    }
+    
+    // 3단계: 발주서 업데이트
+    let updateCount = 0;
+    
+    Object.keys(masterShippingData).forEach(barcode => {
+      const rowIndex = barcodeToRowIndex[barcode];
+      if (rowIndex !== undefined) {
+        const boxInfo = Object.entries(masterShippingData[barcode])
+          .filter(([box, qty]) => qty > 0)
+          .sort(([a], [b]) => parseInt(a) - parseInt(b))
+          .map(([box, qty]) => `${box}(${qty})`)
+          .join(', ');
+        
+        const currentValue = orderData[rowIndex][15] || '';
+        
+        if (currentValue !== boxInfo) {
+          orderData[rowIndex][15] = boxInfo;
+          updateCount++;
+        }
+        
+        // 출고 완료 상태 확인
+        const totalShipped = Object.values(masterShippingData[barcode])
+          .reduce((sum, qty) => sum + qty, 0);
+        const requestedQty = orderData[rowIndex][16] || orderData[rowIndex][3];
+        
+        if (totalShipped >= requestedQty && requestedQty > 0) {
+          if (orderData[rowIndex][9] !== '출고완료') {
+            orderData[rowIndex][9] = '출고완료';
+          }
+        }
+      }
+    });
+    
+    // 변경사항이 있을 때만 저장
+    if (updateCount > 0) {
+      orderRange.setValues(orderData);
+    }
+    
+  } catch (error) {
+    console.error('동기화 실패:', error);
+  }
+}
+
+function getCompletedShippingItems(orderId) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const sheet = ss.getSheetByName('발주서');
+    
+    if (!sheet) {
+      return { success: false, message: '발주서 시트를 찾을 수 없습니다.', items: [] };
+    }
+    
+    const items = [];
+    const lastRow = sheet.getLastRow();
+    
+    if (lastRow > 6) {
+      const numRows = lastRow - 6;
+      // 필요한 열만 가져오기 (성능 개선)
+      const data = sheet.getRange(7, 1, numRows, 17).getValues();
+      
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        
+        // 박스번호가 있는 항목만 (P열 - 인덱스 15)
+        if (row[15]) {
+          const boxNumbers = row[15];
+          const exportableQty = row[16] || row[3]; // Q열 또는 D열
+          
+          // 스캔 수량 계산
+          let scannedQuantity = 0;
+          const matches = boxNumbers.match(/\d+\((\d+)\)/g);
+          if (matches) {
+            matches.forEach(match => {
+              const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+              scannedQuantity += qty;
+            });
+          }
+          
+          // 출고 완료된 항목만 (남은 수량이 0 이하)
+          if (scannedQuantity >= exportableQty) {
+            const item = {
+              barcode: String(row[0]),
+              name: String(row[1] || ''),
+              option: String(row[2] || ''),
+              quantity: exportableQty,
+              scannedQuantity: scannedQuantity,
+              boxNumbers: boxNumbers,
+              stockAvailable: String(row[11] || ''),
+              status: String(row[9] || '')
+            };
+            
+            items.push(item);
+          }
+        }
+      }
+    }
+    
+    return { 
+      success: true, 
+      items: items,
+      message: `${items.length}개 출고 완료 항목`
+    };
+    
+  } catch (error) {
+    console.error('출고 완료 항목 조회 실패:', error);
+    return { 
+      success: false, 
+      message: error.toString(),
+      items: []
+    };
+  }
+}
+
+// 강제 동기화
+function forceSyncPackingList(orderId) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const orderSheet = ss.getSheetByName('발주서');
+    
+    if (!orderSheet) {
+      return { success: false, message: '발주서 시트를 찾을 수 없습니다.' };
+    }
+    
+    // 동기화 실행
+    syncWithPackingList(ss, orderSheet);
+    
+    return {
+      success: true,
+      message: '출고 상태가 동기화되었습니다.'
+    };
+    
+  } catch (error) {
+    console.error('강제 동기화 실패:', error);
+    return {
+      success: false,
+      message: error.toString()
+    };
+  }
+}
+
+// 진단 함수
+function diagnoseShippingConsistency(orderId) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const result = {};
+    
+    // 패킹리스트 데이터
+    const packingSheet = ss.getSheetByName('패킹리스트');
+    if (packingSheet && packingSheet.getLastRow() > 1) {
+      result.packingListData = packingSheet.getRange(2, 1, 
+        packingSheet.getLastRow() - 1, 5).getValues();
+    }
+    
+    // 출고이력 데이터
+    const historySheet = ss.getSheetByName('출고이력');
+    if (historySheet && historySheet.getLastRow() > 1) {
+      result.historyData = historySheet.getRange(2, 1, 
+        historySheet.getLastRow() - 1, 7).getValues();
+    }
+    
+    // 발주서 P열 데이터
+    const orderSheet = ss.getSheetByName('발주서');
+    if (orderSheet && orderSheet.getLastRow() > 6) {
+      const pColumnData = orderSheet.getRange(7, 16, 
+        orderSheet.getLastRow() - 6, 1).getValues();
+      result.orderSheetBoxes = pColumnData
+        .filter(row => row[0])
+        .map(row => row[0]);
+    }
+    
+    // 불일치 분석
+    if (result.packingListData && result.historyData) {
+      const packingBoxes = new Set(result.packingListData.map(row => row[4]));
+      const historyBoxes = new Set(result.historyData.map(row => row[1]));
+      
+      result.missingInPacking = [...historyBoxes].filter(box => !packingBoxes.has(box));
+      result.missingInHistory = [...packingBoxes].filter(box => !historyBoxes.has(box));
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error('진단 중 오류:', error);
+    return { error: error.toString() };
+  }
+}
+
+// 데이터 복구
+function repairShippingData(orderId) {
+  const lockService = LockService.getScriptLock();
+  
+  try {
+    if (!lockService.tryLock(10000)) {
+      return { success: false, message: '다른 작업이 진행 중입니다.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(orderId);
+    const orderSheet = ss.getSheetByName('발주서');
+    const packingSheet = ss.getSheetByName('패킹리스트');
+    const historySheet = ss.getSheetByName('출고이력');
+    
+    const repairLog = [];
+    
+    // 1. 출고이력에서 모든 출고 정보 수집
+    const actualShippingData = {};
+    
+    if (historySheet && historySheet.getLastRow() > 1) {
+      const historyData = historySheet.getRange(2, 1, 
+        historySheet.getLastRow() - 1, 7).getValues();
+      
+      historyData.forEach(row => {
+        const boxNumber = row[1] ? row[1].toString() : '';
+        const barcode = row[2];
+        const quantity = row[5];
+        
+        if (boxNumber && barcode && quantity) {
+          // 박스 번호 정규화 (숫자만 추출)
+          const normalizedBox = boxNumber.match(/\d+/);
+          if (normalizedBox) {
+            const boxNum = parseInt(normalizedBox[0]).toString();
+            
+            if (!actualShippingData[barcode]) {
+              actualShippingData[barcode] = {};
+            }
+            
+            actualShippingData[barcode][boxNum] = 
+              (actualShippingData[barcode][boxNum] || 0) + quantity;
+          }
+        }
+      });
+      
+      repairLog.push(`출고이력에서 ${Object.keys(actualShippingData).length}개 바코드 데이터 수집`);
+    }
+    
+    // 2. 발주서 P열 업데이트
+    if (orderSheet && orderSheet.getLastRow() > 6) {
+      const orderData = orderSheet.getRange(7, 1, 
+        orderSheet.getLastRow() - 6, 17).getValues();
+      
+      let updateCount = 0;
+      
+      for (let i = 0; i < orderData.length; i++) {
+        const barcode = orderData[i][0];
+        
+        if (barcode && actualShippingData[barcode]) {
+          // 박스 정보 재구성 (정렬된 순서로)
+          const boxInfo = Object.entries(actualShippingData[barcode])
+            .sort(([a], [b]) => parseInt(a) - parseInt(b))
+            .map(([box, qty]) => `${box}(${qty})`)
+            .join(', ');
+          
+          const currentValue = orderData[i][15] || '';
+          
+          if (currentValue !== boxInfo) {
+            orderSheet.getRange(i + 7, 16).setValue(boxInfo);
+            updateCount++;
+            repairLog.push(`${barcode}: "${currentValue}" → "${boxInfo}"`);
+          }
+          
+          // 출고 완료 상태 확인
+          const totalShipped = Object.values(actualShippingData[barcode])
+            .reduce((sum, qty) => sum + qty, 0);
+          const requestedQty = orderData[i][16] || orderData[i][3];
+          
+          if (totalShipped >= requestedQty && orderData[i][9] !== '출고완료') {
+            orderSheet.getRange(i + 7, 10).setValue('출고완료');
+          }
+        }
+      }
+      
+      repairLog.push(`발주서 ${updateCount}개 항목 업데이트`);
+    }
+    
+    // 3. 패킹리스트 재생성
+    if (packingSheet) {
+      // 패킹리스트 클리어 및 재생성
+      packingSheet.clear();
+      
+      const headers = ['바코드', '상품명', '옵션', '수량', '박스번호', '메모', '비고', '스캔시간'];
+      packingSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      packingSheet.getRange(1, 1, 1, headers.length)
+        .setBackground('#f0f0f0')
+        .setFontWeight('bold');
+      
+      // 데이터 재구성
+      const newPackingData = [];
+      
+      if (orderSheet) {
+        const orderData = orderSheet.getRange(7, 1, 
+          orderSheet.getLastRow() - 6, 17).getValues();
+        
+        orderData.forEach(row => {
+          const barcode = row[0];
+          
+          if (barcode && actualShippingData[barcode]) {
+            Object.entries(actualShippingData[barcode]).forEach(([boxNum, qty]) => {
+              newPackingData.push([
+                barcode,
+                row[1], // 상품명
+                row[2], // 옵션
+                qty,
+                boxNum,
+                row[8], // 코멘트
+                row[11], // 재고상태
+                new Date()
+              ]);
+            });
+          }
+        });
+      }
+      
+      if (newPackingData.length > 0) {
+        // 박스 번호로 정렬
+        newPackingData.sort((a, b) => parseInt(a[4]) - parseInt(b[4]));
+        
+        packingSheet.getRange(2, 1, newPackingData.length, 8)
+          .setValues(newPackingData);
+          
+        repairLog.push(`패킹리스트 ${newPackingData.length}개 항목 재생성`);
+      }
+    }
+    
+    console.log('복구 로그:\n' + repairLog.join('\n'));
+    
+    return {
+      success: true,
+      message: '출고 데이터가 복구되었습니다.',
+      repairLog: repairLog
+    };
+    
+  } catch (error) {
+    console.error('데이터 복구 실패:', error);
+    return {
+      success: false,
+      message: error.toString()
+    };
+  } finally {
+    lockService.releaseLock();
+  }
+}
+
+// ===== Code.gs에 추가할 검증 함수들 (계속) =====
+
+// 상태 검증
+function validateShippingState(orderId, boxNumber) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const historySheet = ss.getSheetByName('출고이력');
+    
+    if (!historySheet) {
+      return { isValid: true, message: '출고이력 없음' };
+    }
+    
+    // 현재 박스 번호가 이미 사용되었는지 확인
+    const lastRow = historySheet.getLastRow();
+    if (lastRow > 1) {
+      const historyData = historySheet.getRange(2, 2, lastRow - 1, 1).getValues();
+      
+      for (let i = 0; i < historyData.length; i++) {
+        const existingBox = historyData[i][0] ? historyData[i][0].toString() : '';
+        const normalizedExisting = existingBox.match(/\d+/);
+        
+        if (normalizedExisting && parseInt(normalizedExisting[0]) === parseInt(boxNumber)) {
+          return { 
+            isValid: false, 
+            message: `${boxNumber}번 박스는 이미 사용되었습니다.`,
+            suggestion: getNextAvailableBoxNumber(ss)
+          };
+        }
+      }
+    }
+    
+    return { isValid: true };
+    
+  } catch (error) {
+    console.error('상태 검증 실패:', error);
+    return { isValid: true }; // 에러 시 진행 허용
+  }
+}
+
+// 다음 사용 가능한 박스 번호 찾기
+function getNextAvailableBoxNumber(spreadsheet) {
+  try {
+    const historySheet = spreadsheet.getSheetByName('출고이력');
+    if (!historySheet || historySheet.getLastRow() <= 1) {
+      return 1;
+    }
+    
+    const boxNumbers = historySheet.getRange(2, 2, historySheet.getLastRow() - 1, 1)
+      .getValues()
+      .map(row => {
+        const box = row[0] ? row[0].toString() : '';
+        const match = box.match(/\d+/);
+        return match ? parseInt(match[0]) : 0;
+      })
+      .filter(num => num > 0);
+    
+    if (boxNumbers.length === 0) {
+      return 1;
+    }
+    
+    const maxBox = Math.max(...boxNumbers);
+    return maxBox + 1;
+    
+  } catch (error) {
+    console.error('박스 번호 조회 실패:', error);
+    return 1;
+  }
+}
+
+// 무결성 체크
+function checkShippingIntegrity(orderId) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const issues = [];
+    
+    // 1. 박스 번호 형식 체크
+    const orderSheet = ss.getSheetByName('발주서');
+    if (orderSheet && orderSheet.getLastRow() > 6) {
+      const pColumn = orderSheet.getRange(7, 16, orderSheet.getLastRow() - 6, 1).getValues();
+      
+      pColumn.forEach((row, index) => {
+        if (row[0]) {
+          // 비정규화된 박스 번호 체크
+          const matches = row[0].match(/(\d+)\(/g);
+          if (matches) {
+            matches.forEach(match => {
+              const boxNum = match.replace('(', '');
+              if (boxNum.startsWith('0') && boxNum !== '0') {
+                issues.push({
+                  type: 'format',
+                  row: index + 7,
+                  value: row[0],
+                  message: `비정규화된 박스 번호: ${boxNum}`
+                });
+              }
+            });
+          }
+        }
+      });
+    }
+    
+    // 2. 중복 체크
+    const packingSheet = ss.getSheetByName('패킹리스트');
+    if (packingSheet && packingSheet.getLastRow() > 1) {
+      const packingData = packingSheet.getRange(2, 1, 
+        packingSheet.getLastRow() - 1, 5).getValues();
+      
+      const seen = new Set();
+      packingData.forEach((row, index) => {
+        const key = `${row[0]}-${row[4]}`; // 바코드-박스번호
+        if (seen.has(key)) {
+          issues.push({
+            type: 'duplicate',
+            row: index + 2,
+            key: key,
+            message: `중복 항목: ${key}`
+          });
+        }
+        seen.add(key);
+      });
+    }
+    
+    return {
+      hasIssues: issues.length > 0,
+      issues: issues,
+      critical: issues.some(issue => issue.type === 'duplicate')
+    };
+    
+  } catch (error) {
+    console.error('무결성 체크 실패:', error);
+    return { hasIssues: false };
+  }
+}
+
+// 동기화 상태 확인
+function getSyncStatus(orderId) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const orderSheet = ss.getSheetByName('발주서');
+    const packingSheet = ss.getSheetByName('패킹리스트');
+    const historySheet = ss.getSheetByName('출고이력');
+    
+    const status = {
+      hasOrderSheet: !!orderSheet,
+      hasPackingList: !!packingSheet,
+      hasHistory: !!historySheet,
+      orderItemCount: 0,
+      packingItemCount: 0,
+      historyItemCount: 0,
+      lastHistoryDate: null
+    };
+    
+    if (orderSheet && orderSheet.getLastRow() > 6) {
+      const pColumnData = orderSheet.getRange(7, 16, orderSheet.getLastRow() - 6, 1).getValues();
+      status.orderItemCount = pColumnData.filter(row => row[0]).length;
+    }
+    
+    if (packingSheet && packingSheet.getLastRow() > 1) {
+      status.packingItemCount = packingSheet.getLastRow() - 1;
+    }
+    
+    if (historySheet && historySheet.getLastRow() > 1) {
+      status.historyItemCount = historySheet.getLastRow() - 1;
+      
+      // 최근 출고 시간
+      const lastDate = historySheet.getRange(historySheet.getLastRow(), 1).getValue();
+      if (lastDate) {
+        status.lastHistoryDate = Utilities.formatDate(lastDate, 'GMT+9', 'yyyy-MM-dd HH:mm:ss');
+      }
+    }
+    
+    return status;
+    
+  } catch (error) {
+    console.error('상태 확인 실패:', error);
+    return { error: error.toString() };
   }
 }
 
@@ -3006,30 +3793,6 @@ function getVoiceSettings() {
     console.error('음성 설정 로드 실패:', error);
     return getDefaultVoiceSettings();
   }
-}
-
-// 설정에 박스번호 관련 추가
-function getSettings() {
-  const userProperties = PropertiesService.getUserProperties();
-  const settings = userProperties.getProperties();
-  
-  // 박스 바코드는 스프레드시트에서 가져오기
-  const boxBarcodes = getBoxBarcodesFromSheet();
-  
-  return {
-    productSheetId: settings.productSheetId || CONFIG.PRODUCT_SHEET_ID,
-    orderSheetId: settings.orderSheetId || CONFIG.ORDER_SHEET_ID,
-    maxSearchResults: settings.maxSearchResults || CONFIG.MAX_SEARCH_RESULTS,
-    language: settings.language || 'ko',
-    monthlyBudget: settings.monthlyBudget || 10000000,
-    suggestStock0: settings.suggestStock0 || '30',
-    suggestStock10: settings.suggestStock10 || '20',
-    suggestStock20: settings.suggestStock20 || '10',
-    // 박스 설정
-    boxMode: settings.boxMode || 'barcode',
-    boxDigits: settings.boxDigits || '3',
-    boxBarcodes: boxBarcodes // 스프레드시트에서 가져온 데이터
-  };
 }
 
 // 출고 세션 저장/복원
@@ -3573,6 +4336,466 @@ function resetAllBoxNumbers(orderId) {
     return {
       success: false,
       message: error.toString()
+    };
+  }
+}
+
+/**
+ * 웹앱에서 Smaregi 재고 데이터 가져오기
+ * @returns {Object} 재고 데이터
+ */
+function getSmaregiData() {
+  try {
+    console.log('=== getSmaregiData 호출 ===');
+    
+    // Smaregi API 사용 가능 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 사용 불가');
+      return {
+        data: {},
+        uploadTime: null,
+        success: false
+      };
+    }
+    
+    // 재고 데이터 가져오기
+    const stockResult = getSmaregiStockData();
+    
+    if (stockResult.success && stockResult.data) {
+      console.log(`Smaregi 재고 데이터: ${Object.keys(stockResult.data).length}개`);
+      
+      // 바코드를 키로 하는 객체로 변환
+      const stockMap = {};
+      Object.entries(stockResult.data).forEach(([barcode, info]) => {
+        // 재고 수량만 저장 (메모리 절약)
+        stockMap[barcode] = info.quantity || 0;
+      });
+      
+      return {
+        data: stockMap,
+        uploadTime: stockResult.timestamp || new Date().toISOString(),
+        success: true
+      };
+    }
+    
+    return {
+      data: {},
+      uploadTime: null,
+      success: false
+    };
+    
+  } catch (error) {
+    console.error('getSmaregiData 오류:', error);
+    return {
+      data: {},
+      uploadTime: null,
+      success: false,
+      error: error.toString()
+    };
+  }
+}
+
+/**
+ * Smaregi API 사용 가능 여부 확인
+ * @returns {boolean} 사용 가능 여부
+ */
+function isSmaregiAvailable() {
+  try {
+    // Platform API 설정 확인
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      return !!(config.CLIENT_ID && config.CLIENT_SECRET);
+    }
+    
+    // Legacy API 설정 확인 (있다면)
+    const userProps = PropertiesService.getUserProperties();
+    const apiKey = userProps.getProperty('SMAREGI_API_KEY');
+    
+    return !!apiKey;
+    
+  } catch (error) {
+    console.error('Smaregi 사용 가능 여부 확인 실패:', error);
+    return false;
+  }
+}
+
+/**
+ * 개별 상품의 판매 데이터 조회 (웹앱에서 사용)
+ * @param {string} barcode - 상품 바코드
+ * @returns {Object} 판매 데이터
+ */
+function getProductSalesData(barcode) {
+  try {
+    if (!barcode) {
+      return {
+        success: false,
+        message: '바코드가 없습니다'
+      };
+    }
+    
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      return {
+        success: false,
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
+    const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+    
+    console.log(`판매 데이터 조회 - 바코드: ${barcode}, 단기: ${shortPeriod}일, 장기: ${longPeriod}일`);
+    
+    // 장기 판매 데이터 조회
+    const endDate = new Date();
+    const longStartDate = new Date();
+    longStartDate.setDate(longStartDate.getDate() - longPeriod);
+    
+    // 단기 판매 데이터 조회
+    const shortStartDate = new Date();
+    shortStartDate.setDate(shortStartDate.getDate() - shortPeriod);
+    
+    // API에서 판매 데이터 가져오기
+    const longSalesResult = getBatchSalesData([barcode], longPeriod);
+    const shortSalesResult = getBatchSalesData([barcode], shortPeriod);
+    
+    const longSales = longSalesResult && longSalesResult.length > 0 ? longSalesResult[0] : null;
+    const shortSales = shortSalesResult && shortSalesResult.length > 0 ? shortSalesResult[0] : null;
+    
+    // 판매 추세 계산
+    let trend = 'stable';
+    if (longSales && shortSales) {
+      const avgLong = longSales.quantity / longPeriod;
+      const avgShort = shortSales.quantity / shortPeriod;
+      
+      if (avgShort > avgLong * 1.2) {
+        trend = 'up';
+      } else if (avgShort < avgLong * 0.8) {
+        trend = 'down';
+      }
+    }
+    
+    const result = {
+      success: true,
+      salesInfo: {
+        barcode: barcode,
+        lastShortDays: shortSales ? shortSales.quantity : 0,
+        lastLongDays: longSales ? longSales.quantity : 0,
+        dailyAverage: longSales ? parseFloat((longSales.quantity / longPeriod).toFixed(1)) : 0,
+        trend: trend,
+        shortPeriod: shortPeriod,
+        longPeriod: longPeriod,
+        amount: longSales ? longSales.amount : 0
+      }
+    };
+    
+    console.log(`${barcode} 판매 데이터:`, result.salesInfo);
+    
+    return result;
+    
+  } catch (error) {
+    console.error('판매 데이터 조회 실패:', error);
+    return {
+      success: false,
+      message: error.toString()
+    };
+  }
+}
+
+// ===== Code.gs에 추가할 함수들 =====
+
+/**
+ * 여러 바코드로 상품 조회 (프리페치용)
+ */
+function getProductsByBarcodes(barcodes) {
+  if (!barcodes || barcodes.length === 0) return [];
+  
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상품 데이터베이스');
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const barcodeIndex = headers.indexOf('バーコード');
+    
+    if (barcodeIndex === -1) return [];
+    
+    const products = [];
+    const barcodeSet = new Set(barcodes);
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const barcode = String(row[barcodeIndex]);
+      
+      if (barcodeSet.has(barcode)) {
+        const product = {};
+        headers.forEach((header, index) => {
+          product[header] = row[index];
+        });
+        products.push(product);
+        
+        // 찾은 바코드는 제거 (중복 방지)
+        barcodeSet.delete(barcode);
+        
+        // 모두 찾았으면 종료
+        if (barcodeSet.size === 0) break;
+      }
+    }
+    
+    return products;
+    
+  } catch (error) {
+    console.error('상품 일괄 조회 실패:', error);
+    return [];
+  }
+}
+
+/**
+ * 초기 데이터 번들 (최적화)
+ */
+function getInitialDataBundle() {
+  const startTime = new Date().getTime();
+  
+  try {
+    // 캐시 확인
+    const cached = getCache('INITIAL_BUNDLE');
+    if (cached) {
+      console.log('번들 캐시 사용');
+      return cached;
+    }
+    
+    console.log('초기 데이터 번들 생성 시작');
+    
+    const bundle = {
+      timestamp: new Date().toISOString(),
+      settings: getSettings(),
+      translations: loadTranslations((getSettings().language || 'japanese')),
+      currentOrder: checkCurrentOrder(),
+      categoryRules: getCachedCategoryRules(),
+      smaregiData: null,
+      products: null
+    };
+    
+    // 상품 데이터 로드
+    const productsData = loadInitialProductsWithIssues();
+    bundle.products = {
+      data: productsData.products,
+      withIssues: productsData.withIssues,
+      totalCount: productsData.totalCount
+    };
+    
+    // Smaregi 데이터
+    const smaregiData = getSmaregiData();
+    if (smaregiData) {
+      bundle.smaregiData = {
+        data: smaregiData,
+        uploadTime: PropertiesService.getScriptProperties().getProperty('smaregiUploadTime')
+      };
+    }
+    
+    // 발주서가 있으면 발주 항목도 포함
+    if (bundle.currentOrder) {
+      bundle.orderItems = loadOrderItemsFromSheet(bundle.currentOrder.sheetName);
+    }
+    
+    // 캐시 저장 (10분)
+    setCache('INITIAL_BUNDLE', bundle, 600);
+    
+    const loadTime = new Date().getTime() - startTime;
+    console.log(`번들 생성 완료: ${loadTime}ms`);
+    
+    return bundle;
+    
+  } catch (error) {
+    console.error('번들 생성 실패:', error);
+    // 실패시 개별 로드로 폴백
+    return null;
+  }
+}
+
+/**
+ * 카테고리 규칙 캐시 버전
+ */
+function getCachedCategoryRules() {
+  const cached = getCache(CACHE_KEYS.CATEGORY_RULES);
+  if (cached) return cached;
+  
+  const rules = loadCategoryRules();
+  setCache(CACHE_KEYS.CATEGORY_RULES, rules, CACHE_DURATION.LONG);
+  return rules;
+}
+
+// 초기 로드 데이터 병렬 처리
+function getInitialLoadData() {
+  try {
+    console.log('=== 초기 데이터 병렬 로드 시작 ===');
+    
+    // 병렬로 데이터 로드
+    const promises = [
+      // 상품 데이터
+      (() => {
+        try {
+          return {
+            type: 'products',
+            data: loadInitialProductsWithIssues()
+          };
+        } catch (e) {
+          console.error('상품 로드 실패:', e);
+          return { type: 'products', data: null, error: e.toString() };
+        }
+      })(),
+      
+      // 재고 데이터
+      (() => {
+        try {
+          return {
+            type: 'stock',
+            data: getSmaregiStockData()
+          };
+        } catch (e) {
+          console.error('재고 로드 실패:', e);
+          return { type: 'stock', data: null, error: e.toString() };
+        }
+      })(),
+      
+      // 판매 데이터 (첫 50개만)
+      (() => {
+        try {
+          const salesData = {};
+          const products = getFrequentProducts(50);
+          
+          products.forEach(product => {
+            const sales = getCachedSalesData(product.barcode);
+            if (sales) {
+              salesData[product.barcode] = sales;
+            }
+          });
+          
+          return {
+            type: 'sales',
+            data: { success: true, data: salesData }
+          };
+        } catch (e) {
+          console.error('판매 로드 실패:', e);
+          return { type: 'sales', data: null, error: e.toString() };
+        }
+      })()
+    ];
+    
+    // 결과 정리
+    const result = {
+      products: null,
+      stock: null,
+      sales: null
+    };
+    
+    promises.forEach(item => {
+      result[item.type] = item.data;
+    });
+    
+    console.log('=== 초기 데이터 로드 완료 ===');
+    return result;
+    
+  } catch (error) {
+    console.error('초기 데이터 로드 실패:', error);
+    throw error;
+  }
+}
+
+// ===== Code.gs에 추가할 함수 =====
+
+/**
+ * 전체 상품의 판매 데이터 로드 (웹앱용)
+ * @returns {Object} 전체 판매 데이터
+ */
+function loadAllProductsSalesData() {
+  try {
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      return {
+        success: false,
+        data: {},
+        message: 'Smaregi API가 연결되지 않았습니다'
+      };
+    }
+    
+    // 설정에서 기간 가져오기
+    const settings = getSettings();
+    const longPeriod = Math.min(parseInt(settings.salesPeriodLong) || 30, 31); // 최대 31일
+    
+    console.log(`전체 판매 데이터 로드 (${longPeriod}일)`);
+    
+    // 캐시 확인
+    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
+    const cached = getCache(cacheKey);
+    
+    if (cached && cached.timestamp) {
+      const cacheAge = (new Date() - new Date(cached.timestamp)) / 1000 / 60; // 분
+      if (cacheAge < 120) { // 2시간 이내
+        console.log('캐시된 전체 판매 데이터 사용');
+        return {
+          success: true,
+          data: cached.data,
+          timestamp: cached.timestamp,
+          cached: true
+        };
+      }
+    }
+    
+    // 판매 데이터 조회
+    const salesResult = getSimpleSalesDataV2(longPeriod);
+    
+    if (!salesResult || !salesResult.success) {
+      console.error('판매 데이터 조회 실패');
+      return {
+        success: false,
+        data: {},
+        message: '판매 데이터 조회 실패'
+      };
+    }
+    
+    // 바코드를 키로 하는 맵으로 변환
+    // (getSimpleSalesDataV2는 productCode를 키로 반환하는데, 우리 시스템에서는 바코드가 productCode와 동일)
+    const salesByBarcode = {};
+    
+    Object.entries(salesResult.data || {}).forEach(([productCode, salesData]) => {
+      // productCode를 바코드로 사용
+      salesByBarcode[productCode] = {
+        barcode: productCode,
+        quantity: salesData.quantity || 0,
+        avgDaily: parseFloat(((salesData.quantity || 0) / longPeriod).toFixed(1)),
+        amount: salesData.amount || 0,
+        transactions: salesData.transactions || 0,
+        productName: salesData.productName || '',
+        trend: 'stable' // 추세는 별도 계산 필요시 추가
+      };
+    });
+    
+    console.log(`${Object.keys(salesByBarcode).length}개 상품의 판매 데이터 수집`);
+    
+    // 결과 캐싱
+    const cacheData = {
+      data: salesByBarcode,
+      timestamp: new Date().toISOString()
+    };
+    
+    setCache(cacheKey, cacheData, 7200); // 2시간 캐시
+    
+    return {
+      success: true,
+      data: salesByBarcode,
+      timestamp: cacheData.timestamp,
+      cached: false
+    };
+    
+  } catch (error) {
+    console.error('전체 판매 데이터 로드 실패:', error);
+    return {
+      success: false,
+      data: {},
+      error: error.toString()
     };
   }
 }
