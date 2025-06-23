@@ -752,17 +752,6 @@ async function loadInitialDataWithBundle() {
 
 // 번들 데이터 적용
 function applyBundleData(bundle) {
-
-  if (bundle.products && Array.isArray(bundle.products)) {
-    AppState.products = bundle.products;
-    
-    // 캐시에 상품 정보 저장
-    bundle.products.forEach(product => {
-      if (product && product.barcode) {
-        cache.set('product', product.barcode, product);
-      }
-    });
-  }
   // 설정
   if (bundle.settings) {
     AppState.settings = bundle.settings;
@@ -780,12 +769,22 @@ function applyBundleData(bundle) {
     enableOrderFeatures();
   }
   
-  // 상품 데이터
+  // 상품 데이터 - 올바른 구조로 처리
   if (bundle.products) {
+    // bundle.products는 객체이므로 data 속성에서 배열을 가져옴
     AppState.products = bundle.products.data || [];
     AppState.productsWithIssues = bundle.products.withIssues || [];
     AppState.totalProductCount = bundle.products.totalCount || 0;
     AppState.productsLoaded = true;
+    
+    // 캐시에 상품 정보 저장
+    if (Array.isArray(bundle.products.data)) {
+      bundle.products.data.forEach(product => {
+        if (product && product.barcode) {
+          cache.set('product', product.barcode, product);
+        }
+      });
+    }
   }
   
   // Smaregi 데이터
@@ -3601,6 +3600,27 @@ function updateOrderList() {
             ${storeStockBadge}
             ${isConfirmed ? '<span class="confirmed-badge">확정</span>' : ''}
             ${isExported ? `<span class="exported-badge" title="내보내기: ${item.exportedAt || '완료'}">내보내기 완료</span>` : ''}
+            ${(() => {
+              // 출고 완료 상태 체크 (박스번호 기반)
+              if (item.boxNumbers) {
+                const matches = (item.boxNumbers || '').match(/\d+\((\d+)\)/g);
+                if (matches) {
+                  let totalShipped = 0;
+                  matches.forEach(match => {
+                    const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+                    totalShipped += qty;
+                  });
+                  
+                  const exportableQty = item.exportableQuantity || item.quantity;
+                  if (totalShipped >= exportableQty) {
+                    return '<span class="shipped-badge">출고완료</span>';
+                  } else if (totalShipped > 0) {
+                    return `<span class="partial-shipped-badge">부분출고 (${totalShipped}/${exportableQty})</span>`;
+                  }
+                }
+              }
+              return '';
+            })()}
           </div>
           ${colorSizeHtml}
         </div>
