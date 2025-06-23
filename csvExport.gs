@@ -1,7 +1,6 @@
 // ===== CSV 내보내기 관련 함수 csvExport.gs =====
 
 // CSV 내보내기 메인 함수
-// csvExport.gs의 exportToCSV 함수 수정
 function exportToCSV(orderId, exportItems) {
   console.log('exportToCSV 호출됨');
   console.log('orderId:', orderId);
@@ -13,9 +12,47 @@ function exportToCSV(orderId, exportItems) {
       return { success: false, message: '내보낼 항목이 없습니다.' };
     }
     
+    // ⭐ 서버 사이드에서도 미확인 항목 필터링 추가
+    console.log('미확인 항목 필터링 시작');
+    const filteredItems = exportItems.filter(item => {
+      // 재고 상태 정규화 (trim, 빈 문자열 처리)
+      const stockStatus = item.stockAvailable ? String(item.stockAvailable).trim() : '';
+      
+      // 미확인 상태 체크 (대소문자 무시)
+      if (!stockStatus || stockStatus === '' || stockStatus === '미확인' || stockStatus.toLowerCase() === '미확인') {
+        console.log(`필터링됨 - 재고 미확인: ${item.barcode} - ${item.name}`);
+        return false;
+      }
+      
+      // 품절, 오더중 상태도 제외
+      const normalizedStatus = stockStatus.toLowerCase();
+      if (normalizedStatus === '품절' || normalizedStatus === '오더중') {
+        console.log(`필터링됨 - ${stockStatus}: ${item.barcode} - ${item.name}`);
+        return false;
+      }
+      
+      // 확정 상태가 아닌 경우도 제외
+      if (item.status !== '확정') {
+        console.log(`필터링됨 - 미확정: ${item.barcode} - ${item.name}`);
+        return false;
+      }
+      
+      return true;
+    });
+    
+    console.log(`필터링 결과: ${exportItems.length}개 중 ${filteredItems.length}개 내보내기 가능`);
+    
+    // 필터링 후 내보낼 항목이 없으면 중단
+    if (filteredItems.length === 0) {
+      return { 
+        success: false, 
+        message: '내보낼 수 있는 항목이 없습니다. (모든 항목이 미확인, 품절, 오더중 또는 미확정 상태입니다)' 
+      };
+    }
+    
     console.log('CSV 데이터 생성 시작');
-    // 1. CSV 데이터 생성
-    const csvData = createCSVData(exportItems);
+    // 1. CSV 데이터 생성 (필터링된 항목으로)
+    const csvData = createCSVData(filteredItems);
     console.log('CSV 데이터 생성 완료, 길이:', csvData.length);
     
     console.log('파일명 생성 시작');
@@ -25,12 +62,12 @@ function exportToCSV(orderId, exportItems) {
     
     console.log('내보내기 이력 저장 시작');
     // 3. 내보내기 이력 저장
-    const exportRecord = saveExportHistory(orderId, exportItems, filename);
+    const exportRecord = saveExportHistory(orderId, filteredItems, filename);
     console.log('내보내기 이력 저장 완료');
     
     console.log('발주서 상태 업데이트 시작');
     // 4. 발주서에 상태 업데이트
-    updateOrderSheetExportStatus(orderId, exportItems, exportRecord);
+    updateOrderSheetExportStatus(orderId, filteredItems, exportRecord);
     console.log('발주서 상태 업데이트 완료');
     
     // 5. CSV 내용 반환 (클라이언트에서 다운로드)
@@ -39,20 +76,26 @@ function exportToCSV(orderId, exportItems) {
       success: true,
       csvContent: csvData,
       filename: filename,
-      exportedCount: exportItems.length,
+      exportedCount: filteredItems.length, // 필터링된 개수
       exportedAt: exportRecord.exportedAt instanceof Date ? 
         exportRecord.exportedAt.toISOString() : 
         new Date().toISOString(),
       exportId: exportRecord.exportId || exportRecord.id || Utilities.getUuid(),
       // 내보낸 항목들의 정보 추가
-      exportedItems: exportItems.map(item => ({
+      exportedItems: filteredItems.map(item => ({
         id: item.id,
         barcode: item.barcode,
         exportedAt: exportRecord.exportedAt instanceof Date ? 
           exportRecord.exportedAt.toISOString() : 
           new Date().toISOString(),
         exportQuantity: item.exportQuantity || item.quantity
-      }))
+      })),
+      // 필터링 정보 추가
+      filteredInfo: {
+        original: exportItems.length,
+        exported: filteredItems.length,
+        filtered: exportItems.length - filteredItems.length
+      }
     };
     
     return result;
@@ -343,22 +386,21 @@ function getExportHistory(orderId) {
     const ss = SpreadsheetApp.openById(orderId);
     const historySheet = ss.getSheetByName('내보내기이력');
     
-    if (!historySheet) {
-      return [];
-    }
+    if (!historySheet) return [];
     
-    const data = historySheet.getDataRange().getValues();
+    const lastRow = historySheet.getLastRow();
+    if (lastRow <= 1) return [];
+    
+    const data = historySheet.getRange(2, 1, lastRow - 1, 3).getValues();
     const history = [];
     
-    // 최근 10개만 반환 (역순)
-    for (let i = Math.max(1, data.length - 10); i < data.length; i++) {
+    // 최근 10개만 반환
+    for (let i = data.length - 1; i >= 0 && history.length < 10; i--) {
       if (data[i][0]) {
-        history.unshift({
-          id: data[i][0],
-          exportedAt: data[i][1],
-          exportedBy: data[i][2],
-          filename: data[i][3],
-          itemCount: data[i][4]
+        history.push({
+          exportedAt: data[i][0],
+          exportedBy: data[i][1],
+          itemCount: data[i][2]
         });
       }
     }
