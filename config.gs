@@ -60,19 +60,23 @@ const CONFIG = {
 
 // 발주서 열 인덱스 정의 (0부터 시작)
 const ORDER_COLUMNS = {
-    BARCODE: 0, // A열
-    PRODUCT_NAME: 1, // B열
-    OPTION: 2, // C열
-    QUANTITY: 3, // D열
-    MEMO: 4, // E열
-    WEIGHT: 5, // F열
-    PRIORITY: 6, // G열
-    COMMENT: 7, // H열
-    STATUS: 8, // I열
-    PURCHASE_PRICE: 9, // J열
-    CONFIRM_TIME: 10, // K열
-    STOCK_STATUS: 11, // L열
-    SUPPLIER_NAME: 12 // M열
+    BARCODE: 0,           // A열: 바코드
+    PRODUCT_NAME: 1,      // B열: 상품명
+    OPTION: 2,            // C열: 옵션
+    QUANTITY: 3,          // D열: 발주수량
+    UNIT_PRICE: 4,        // E열: 단가
+    AMOUNT: 5,            // F열: 금액
+    WEIGHT: 6,            // G열: 중량
+    PRIORITY: 7,          // H열: 우선순위
+    COMMENT: 8,           // I열: 코멘트
+    STATUS: 9,            // J열: 상태
+    CONFIRM_TIME: 10,     // K열: 확정시간
+    STOCK_STATUS: 11,     // L열: 재고가능여부
+    SUPPLIER_NAME: 12,    // M열: 공급사
+    EXPORT_TIME: 13,      // N열: 내보내기시간
+    CSV_CONFIRM: 14,      // O열: CSV확인
+    BOX_NUMBERS: 15,      // P열: 박스번호
+    EXPORTABLE_QTY: 16    // Q열: 출고가능수량
 };
 
 // 상품 마스터 열 인덱스 정의
