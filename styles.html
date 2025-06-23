@@ -1729,7 +1729,6 @@ button .loading-spinner-small {
     display: inline-flex !important;
     align-items: center !important;
     gap: 6px !important;
-    margin-right: 12px !important;
     border-radius: 12px !important;
     padding: 2px 8px;
     background: #f0f0f0;
@@ -5512,6 +5511,33 @@ body.sticky-footer-active {
     margin-left: 8px;
 }
 
+.shipped-badge {
+  background-color: #28a745;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.partial-shipped-badge {
+  background-color: #17a2b8;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+/* 여러 배지가 있을 때 간격 조정 */
+.order-product-main > span[class$="-badge"] + span[class$="-badge"] {
+  margin-left: 4px;
+}
+
 /* 중복 항목 강조 개선 */
 .order-item.has-duplicate {
     border-left: 3px solid #ff9800;
@@ -6592,12 +6618,6 @@ body.sticky-footer-active {
     align-items: center;
     gap: 8px;
     margin-top: 0px;
-}
-
-.shipping-item .color-chip-container {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
 }
 
 .shipping-item .color-chip {
@@ -7749,7 +7769,6 @@ body.sticky-footer-active {
 .box-numbers {
     font-size: 13px;
     color: #495057;
-    background: #e9ecef;
     padding: 4px 12px;
     border-radius: 4px;
     display: inline-block;
