@@ -7233,8 +7233,10 @@ function performValidation(items) {
     
     result.confirmedItems++;
     
-    // 재고 상태 체크
-    if (!item.stockAvailable || item.stockAvailable === '미확인') {
+    // 재고 상태 체크 - trim()과 정규화 추가
+    const stockStatus = item.stockAvailable ? String(item.stockAvailable).trim() : '';
+    
+    if (!stockStatus || stockStatus === '' || stockStatus === '미확인' || stockStatus.toLowerCase() === '미확인') {
       result.withoutStockStatus++;
       result.excludedItems.push({
         item: item,
@@ -7245,12 +7247,13 @@ function performValidation(items) {
     
     result.withStockStatus++;
     
-    const stockStatus = String(item.stockAvailable).toLowerCase();
+    // 재고 상태 문자열 정규화 (소문자로 변환하여 비교)
+    const normalizedStatus = stockStatus.toLowerCase();
     
-    if (stockStatus === '품절' || stockStatus === '오더중') {
+    if (normalizedStatus === '품절' || normalizedStatus === '오더중') {
       result.excludedItems.push({
         item: item,
-        reason: stockStatus
+        reason: stockStatus  // 원본 값으로 표시
       });
       return;
     }
@@ -7265,8 +7268,9 @@ function performValidation(items) {
     
     // 내보낼 수량 계산
     let exportQuantity = item.quantity;
-    if (stockStatus !== '가능') {
-      const match = stockStatus.match(/(\d+)개/);
+    if (normalizedStatus !== '가능') {
+      // "X개만 가능" 형식 처리
+      const match = stockStatus.match(/(\d+)\s*개만\s*가능/);
       if (match) {
         exportQuantity = Math.min(parseInt(match[1]), item.quantity);
       }
