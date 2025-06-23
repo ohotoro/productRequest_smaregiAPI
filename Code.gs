@@ -2703,9 +2703,7 @@ function resetOrderBoxNumber(orderId) {
     return { success: false, error: error.toString() };
   }
 }
-
-// 내보내기 완료된 항목 조회
-// 내보내기 완료된 항목 조회
+// 내보내기 완료된 항목 조회 - 바코드별로 그룹화하여 중복 제거
 function getExportedItems(orderId) {
   try {
     if (!orderId) {
@@ -2722,7 +2720,8 @@ function getExportedItems(orderId) {
     // 먼저 패킹리스트와 동기화
     syncWithPackingList(ss, sheet);
     
-    const items = [];
+    // 바코드별로 그룹화할 맵
+    const groupedItems = new Map();
     const lastRow = sheet.getLastRow();
     
     if (lastRow > 6) {
@@ -2733,6 +2732,7 @@ function getExportedItems(orderId) {
         const row = data[i];
         
         if (row[13] && row[0]) { // exportedAt && barcode
+          const barcode = String(row[0]);
           const boxNumbers = row[15] || ''; // P열: 박스번호
           const exportableQty = row[16] || 0; // Q열: 출고가능수량
           
@@ -2749,20 +2749,69 @@ function getExportedItems(orderId) {
           }
           
           const exportQuantity = exportableQty > 0 ? Number(exportableQty) : Number(row[3]);
-          const remainingQuantity = exportQuantity - scannedQuantity;
           
-          // 남은 수량이 있는 항목만 추가
-          if (remainingQuantity > 0) {
-            // 내보내기 시간이 있으면 exportStatus 생성
-            let exportStatus = '';
-            if (row[13]) { // N열에 값이 있으면
-              const exportTimeStr = String(row[13]);
-              exportStatus = `내보내기 완료 (${exportTimeStr})`;
+          // 바코드가 이미 그룹에 있는지 확인
+          if (groupedItems.has(barcode)) {
+            const existingItem = groupedItems.get(barcode);
+            
+            // 수량 누적
+            existingItem.quantity += exportQuantity;
+            existingItem.originalQuantity += Number(row[3]) || 0;
+            existingItem.scannedQuantity += scannedQuantity;
+            
+            // 박스번호 추가 (중복 제거)
+            if (boxNumbers) {
+              existingItem.boxNumbers = mergeBoxNumbers(existingItem.boxNumbers, boxNumbers);
             }
             
+            // 행 인덱스 추가 (여러 행 추적용)
+            existingItem.rowIndices.push(i + 7);
+            
+            // 내보내기 시간 업데이트 (가장 최근 것으로)
+            if (row[13]) {
+              const newExportTime = new Date(String(row[13]));
+              const existingExportTime = new Date(existingItem.exportedAt);
+              if (newExportTime > existingExportTime) {
+                existingItem.exportedAt = String(row[13]);
+                existingItem.exportStatus = `내보내기 완료 (${String(row[13])})`;
+              }
+            }
+            
+            // 남은 수량 재계산
+            existingItem.remainingQuantity = existingItem.quantity - existingItem.scannedQuantity;
+            
+            // 출고 완료 여부 재계산
+            existingItem.isFullyShipped = existingItem.scannedQuantity >= existingItem.quantity;
+            
+            // 부분 출고 정보 재계산
+            existingItem.shippingInfo = (() => {
+              if (!existingItem.boxNumbers) return null;
+              let totalShipped = 0;
+              const boxDetails = [];
+              const matches = existingItem.boxNumbers.match(/\d+\((\d+)\)/g);
+              if (matches) {
+                matches.forEach(match => {
+                  const boxNum = match.match(/(\d+)\(/)[1];
+                  const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+                  totalShipped += qty;
+                  boxDetails.push({ boxNumber: boxNum, quantity: qty });
+                });
+              }
+              return {
+                totalShipped: totalShipped,
+                exportableQty: existingItem.quantity,
+                isPartial: totalShipped > 0 && totalShipped < existingItem.quantity,
+                isComplete: totalShipped >= existingItem.quantity,
+                boxDetails: boxDetails
+              };
+            })();
+            
+          } else {
+            // 새로운 바코드 항목 생성
             const item = {
               rowIndex: i + 7,
-              barcode: String(row[0]),
+              rowIndices: [i + 7], // 여러 행 추적용
+              barcode: barcode,
               name: String(row[1] || ''),
               option: String(row[2] || ''),
               quantity: exportQuantity,
@@ -2778,11 +2827,9 @@ function getExportedItems(orderId) {
               csvConfirmed: row[14] === '✓',
               boxNumbers: boxNumbers,
               scannedQuantity: scannedQuantity,
-              remainingQuantity: remainingQuantity,
-              
-              // 추가 필드들
-              exportStatus: exportStatus,
-              confirmedStatus: row[9] === '확정', // 확정 여부 별도 플래그
+              remainingQuantity: exportQuantity - scannedQuantity,
+              exportStatus: row[13] ? `내보내기 완료 (${String(row[13])})` : '',
+              confirmedStatus: row[9] === '확정',
               
               // 출고 완료 여부 계산 (박스번호 기반)
               isFullyShipped: (() => {
@@ -2822,16 +2869,22 @@ function getExportedItems(orderId) {
               })()
             };
             
-            items.push(item);
-          } else {
-            // 출고 완료 상태 업데이트 (기존 상태가 '확정'이면 유지)
-            if (row[9] !== '출고완료' && row[9] !== '확정') {
-              sheet.getRange(i + 7, 10).setValue('출고완료');
-            }
+            groupedItems.set(barcode, item);
           }
         }
       }
     }
+    
+    // Map을 배열로 변환하고 남은 수량이 있는 항목만 필터링
+    const items = Array.from(groupedItems.values())
+      .filter(item => item.remainingQuantity > 0)
+      .sort((a, b) => {
+        // 우선순위로 정렬, 같으면 이름으로 정렬
+        if (a.priority !== b.priority) {
+          return a.priority - b.priority;
+        }
+        return a.name.localeCompare(b.name);
+      });
     
     // 발주서별 현재 박스번호 가져오기
     let currentBoxNumber = 1;
@@ -2845,7 +2898,7 @@ function getExportedItems(orderId) {
       success: true, 
       items: items || [],
       currentBoxNumber: currentBoxNumber || 1,
-      message: `${items.length}개 항목을 로드했습니다.`
+      message: `${items.length}개 항목을 로드했습니다. (그룹화됨)`
     };
     
   } catch (error) {
@@ -2857,6 +2910,47 @@ function getExportedItems(orderId) {
       currentBoxNumber: 1
     };
   }
+}
+
+// 박스번호 병합 헬퍼 함수
+function mergeBoxNumbers(existing, newNumbers) {
+  if (!existing) return newNumbers;
+  if (!newNumbers) return existing;
+  
+  // 박스번호를 파싱하여 Map으로 관리
+  const boxMap = new Map();
+  
+  // 기존 박스번호 파싱
+  const existingMatches = existing.match(/(\d+)\((\d+)\)/g);
+  if (existingMatches) {
+    existingMatches.forEach(match => {
+      const boxMatch = match.match(/(\d+)\((\d+)\)/);
+      const boxNum = boxMatch[1];
+      const qty = parseInt(boxMatch[2]);
+      boxMap.set(boxNum, (boxMap.get(boxNum) || 0) + qty);
+    });
+  }
+  
+  // 새 박스번호 파싱
+  const newMatches = newNumbers.match(/(\d+)\((\d+)\)/g);
+  if (newMatches) {
+    newMatches.forEach(match => {
+      const boxMatch = match.match(/(\d+)\((\d+)\)/);
+      const boxNum = boxMatch[1];
+      const qty = parseInt(boxMatch[2]);
+      boxMap.set(boxNum, (boxMap.get(boxNum) || 0) + qty);
+    });
+  }
+  
+  // Map을 문자열로 변환
+  const result = [];
+  const sortedBoxNumbers = Array.from(boxMap.keys()).sort((a, b) => parseInt(a) - parseInt(b));
+  
+  sortedBoxNumbers.forEach(boxNum => {
+    result.push(`${boxNum}(${boxMap.get(boxNum)})`);
+  });
+  
+  return result.join(', ');
 }
 
 // 박스 정보 확인 함수 - 번호와 바코드 모두 지원
@@ -2873,7 +2967,7 @@ function isBoxIdentifier(identifier) {
   }
 }
 
-// 출고 데이터 저장
+// 출고 데이터 저장 - 같은 바코드의 여러 행에 분산 저장
 function saveShippingData(orderId, shippingData) {
   const lockService = LockService.getScriptLock();
   
@@ -2889,119 +2983,144 @@ function saveShippingData(orderId, shippingData) {
       throw new Error('발주서 시트를 찾을 수 없습니다.');
     }
     
-    // 박스 번호 정규화
-    let boxNumber = null;
-    if (shippingData.boxName) {
-      const extracted = shippingData.boxName.match(/\d+/);
-      if (extracted) {
-        boxNumber = parseInt(extracted[0]).toString();
-      }
-    }
+    // 먼저 전체 데이터를 읽어서 바코드별로 인덱싱
+    const lastRow = sheet.getLastRow();
+    const allData = sheet.getRange(7, 1, lastRow - 6, 17).getValues();
+    const barcodeRows = new Map(); // 바코드별 행 정보 저장
     
-    if (!boxNumber) {
-      throw new Error('박스 번호를 확인할 수 없습니다.');
-    }
-    
-    // 트랜잭션 시작
-    const batchUpdates = {
-      orderUpdates: [],
-      historyData: [],
-      packingData: []
-    };
-    
-    // 1. 발주서 업데이트 준비
-    shippingData.items.forEach(item => {
-      const rowIndex = item.rowIndex;
-      const currentBoxNumbers = sheet.getRange(rowIndex, 16).getValue() || '';
-      
-      // 기존 박스 정보 파싱 및 정규화
-      let existingBoxMap = {};
-      if (currentBoxNumbers) {
-        const matches = currentBoxNumbers.match(/(\d+)\((\d+)\)/g);
-        if (matches) {
-          matches.forEach(match => {
-            const [, box, qty] = match.match(/(\d+)\((\d+)\)/);
-            const normalizedBox = parseInt(box).toString();
-            existingBoxMap[normalizedBox] = (existingBoxMap[normalizedBox] || 0) + parseInt(qty);
-          });
+    // 바코드별로 행 정보 수집 (내보내기된 항목만)
+    allData.forEach((row, index) => {
+      if (row[0] && row[13]) { // 바코드가 있고 내보내기 시간이 있는 경우
+        const barcode = String(row[0]);
+        if (!barcodeRows.has(barcode)) {
+          barcodeRows.set(barcode, []);
         }
+        barcodeRows.get(barcode).push({
+          rowIndex: index + 7,
+          exportableQty: row[16] || row[3], // Q열 또는 D열
+          existingBoxNumbers: row[15] || '', // P열
+          scannedQty: 0 // 기존 스캔 수량 계산할 예정
+        });
       }
-      
-      // 현재 박스 추가
-      existingBoxMap[boxNumber] = (existingBoxMap[boxNumber] || 0) + item.scannedInThisBox;
-      
-      // 박스 정보 재구성
-      const updatedBoxNumbers = Object.entries(existingBoxMap)
-        .sort(([a], [b]) => parseInt(a) - parseInt(b))
-        .map(([box, qty]) => `${box}(${qty})`)
-        .join(', ');
-      
-      batchUpdates.orderUpdates.push({
-        rowIndex: rowIndex,
-        boxNumbers: updatedBoxNumbers,
-        status: item.remainingQuantity === 0 ? '출고완료' : sheet.getRange(rowIndex, 10).getValue()
+    });
+    
+    // 각 행의 기존 스캔 수량 계산
+    barcodeRows.forEach((rows, barcode) => {
+      rows.forEach(rowInfo => {
+        if (rowInfo.existingBoxNumbers) {
+          const matches = rowInfo.existingBoxNumbers.match(/\d+\((\d+)\)/g);
+          if (matches) {
+            let scanned = 0;
+            matches.forEach(match => {
+              const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+              scanned += qty;
+            });
+            rowInfo.scannedQty = scanned;
+          }
+        }
       });
     });
     
-    // 2. 출고이력 데이터 준비
     const timestamp = new Date();
-    const user = Session.getActiveUser().getEmail();
+    const packingDataArray = [];
     
-    batchUpdates.historyData = shippingData.items.map(item => [
-      timestamp,
-      boxNumber,
-      item.barcode,
-      item.name,
-      item.option || '',
-      item.scannedInThisBox,
-      user
-    ]);
-    
-    // 3. 패킹리스트 데이터 준비
-    batchUpdates.packingData = shippingData.items.map(item => ({
-      barcode: item.barcode,
-      name: item.name,
-      option: item.option || '',
-      quantity: item.scannedInThisBox,
-      boxNumber: boxNumber,
-      comment: item.comment || '',
-      stockAvailable: item.stockAvailable || '',
-      timestamp: timestamp
-    }));
-    
-    // 4. 배치 실행
-    if (batchUpdates.orderUpdates.length > 0) {
-      batchUpdates.orderUpdates.forEach(update => {
-        sheet.getRange(update.rowIndex, 16).setValue(update.boxNumbers);
-        if (update.status === '출고완료') {
-          sheet.getRange(update.rowIndex, 10).setValue(update.status);
+    // 각 제품별로 처리
+    shippingData.items.forEach(item => {
+      const barcode = item.barcode;
+      const rows = barcodeRows.get(barcode);
+      
+      if (!rows || rows.length === 0) {
+        console.error(`바코드 ${barcode}에 대한 행을 찾을 수 없습니다.`);
+        return;
+      }
+      
+      // 스캔된 수량을 여러 행에 분배
+      let remainingToScan = item.scannedInThisBox;
+      
+      // 남은 수량이 있는 행부터 채우기
+      const availableRows = rows
+        .filter(r => r.exportableQty - r.scannedQty > 0)
+        .sort((a, b) => a.rowIndex - b.rowIndex); // 위쪽 행부터
+      
+      availableRows.forEach(rowInfo => {
+        if (remainingToScan <= 0) return;
+        
+        const availableInRow = rowInfo.exportableQty - rowInfo.scannedQty;
+        const toScanInRow = Math.min(remainingToScan, availableInRow);
+        
+        if (toScanInRow > 0) {
+          // 이 행의 박스번호 업데이트
+          const newBoxNumber = `${shippingData.boxNumber}(${toScanInRow})`;
+          let updatedBoxNumbers = rowInfo.existingBoxNumbers;
+          
+          if (updatedBoxNumbers) {
+            // 같은 박스번호가 이미 있는지 확인
+            const boxRegex = new RegExp(`${shippingData.boxNumber}\\((\\d+)\\)`);
+            const existingMatch = updatedBoxNumbers.match(boxRegex);
+            
+            if (existingMatch) {
+              // 같은 박스번호가 있으면 수량 업데이트
+              const existingQty = parseInt(existingMatch[1]);
+              updatedBoxNumbers = updatedBoxNumbers.replace(
+                boxRegex,
+                `${shippingData.boxNumber}(${existingQty + toScanInRow})`
+              );
+            } else {
+              // 새 박스번호 추가
+              updatedBoxNumbers += `, ${newBoxNumber}`;
+            }
+          } else {
+            updatedBoxNumbers = newBoxNumber;
+          }
+          
+          // P열 업데이트
+          sheet.getRange(rowInfo.rowIndex, 16).setValue(updatedBoxNumbers);
+          
+          // 출고 완료 상태 확인 및 업데이트
+          if (rowInfo.scannedQty + toScanInRow >= rowInfo.exportableQty) {
+            const currentStatus = sheet.getRange(rowInfo.rowIndex, 10).getValue();
+            // 기존 상태가 '확정'이 아니면 '출고완료'로 변경
+            if (currentStatus !== '확정') {
+              sheet.getRange(rowInfo.rowIndex, 10).setValue('출고완료');
+            }
+          }
+          
+          remainingToScan -= toScanInRow;
+          
+          // 패킹리스트용 데이터 추가
+          packingDataArray.push({
+            barcode: item.barcode,
+            name: item.name,
+            option: item.option,
+            quantity: toScanInRow,
+            boxNumber: shippingData.boxNumber,
+            comment: item.comment,
+            stockAvailable: item.stockAvailable,
+            timestamp: timestamp
+          });
         }
       });
-    }
+      
+      if (remainingToScan > 0) {
+        console.warn(`바코드 ${barcode}: ${remainingToScan}개를 저장할 행이 부족합니다.`);
+      }
+    });
     
-    // 출고이력 저장
-    let historySheet = ss.getSheetByName('출고이력');
-    if (!historySheet) {
-      historySheet = ss.insertSheet('출고이력');
-      const headers = ['출고일시', '박스번호', '바코드', '상품명', '옵션', '수량', '담당자'];
-      historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      historySheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-    }
-    
-    if (batchUpdates.historyData.length > 0) {
-      const lastRow = historySheet.getLastRow();
-      historySheet.getRange(lastRow + 1, 1, batchUpdates.historyData.length, 7)
-        .setValues(batchUpdates.historyData);
-    }
+    // 출고이력 저장 (saveShippingHistory 함수 호출)
+    saveShippingHistory(ss, shippingData, shippingData.boxNumber);
     
     // 패킹리스트 업데이트
-    updatePackingListWithBatch(ss, batchUpdates.packingData);
+    updatePackingListWithBatch(ss, packingDataArray);
+    
+    // 박스번호 증가 및 저장
+    const nextBoxNumber = parseInt(shippingData.boxNumber) + 1;
+    setOrderBoxNumber(orderId, nextBoxNumber);
     
     return {
       success: true,
-      message: `${boxNumber}번 박스 출고 완료`,
-      boxNumber: boxNumber,
-      savedItems: batchUpdates.orderUpdates.length
+      nextBoxNumber: nextBoxNumber,
+      savedCount: shippingData.items.length,
+      message: `${shippingData.boxNumber}번 박스 출고 완료`
     };
     
   } catch (error) {
