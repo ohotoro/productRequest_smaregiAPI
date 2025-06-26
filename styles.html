@@ -1472,6 +1472,12 @@ body {
     font-weight: 500;
 }
 
+.loading-submessage {
+  font-size: 14px;
+  color: #666;
+}
+
+
 .loading-progress {
     margin-top: 20px;
     width: 100%;
@@ -1482,25 +1488,53 @@ body {
 }
 
 .loading-progress-bar {
-    height: 100%;
-    background: var(--primary);
-    width: 0;
-    transition: width 0.3s ease;
-    animation: progress 2s ease-in-out infinite;
+  height: 100%;
+  background: linear-gradient(90deg, #007bff 0%, #0056b3 100%);
+  width: 0%;
+  transition: width 0.3s ease;
+  animation: progress-pulse 2s ease-in-out infinite;
 }
 
-@keyframes progress {
-    0% {
-        width: 0%;
-    }
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
 
-    50% {
-        width: 70%;
-    }
+/* 성공 체크마크 애니메이션 */
+.success-checkmark {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 24px;
+}
 
-    100% {
-        width: 95%;
-    }
+.success-checkmark circle {
+  stroke: #4CAF50;
+  stroke-width: 3;
+  fill: none;
+  stroke-dasharray: 150;
+  stroke-dashoffset: 150;
+  animation: circle-draw 0.6s ease-out forwards;
+}
+
+.success-checkmark path {
+  stroke: #4CAF50;
+  stroke-width: 3;
+  fill: none;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: check-draw 0.3s 0.6s ease-out forwards;
+}
+
+@keyframes circle-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 button .loading-spinner-small {
@@ -1667,6 +1701,15 @@ button .loading-spinner-small {
     background: rgba(76, 175, 80, .9)
 }
 
+.save-indicator .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
 .save-indicator.error {
     background: rgba(244, 67, 54, .9)
 }
@@ -1674,6 +1717,32 @@ button .loading-spinner-small {
 .save-indicator.show {
     opacity: 1;
     display: block
+}
+
+.csv-drop-zone:hover {
+  border-color: #0056b3;
+  background: #e9ecef;
+}
+
+.csv-drop-zone.drag-over {
+  border-color: #28a745;
+  background: #d4edda;
+  transform: scale(1.02);
+}
+
+.upload-success {
+  animation: fadeInScale 0.3s ease;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .empty-state {
@@ -1733,6 +1802,7 @@ button .loading-spinner-small {
     padding: 2px 8px;
     background: #f0f0f0;
     box-shadow: 0 0 3px #bcbcbc;
+    margin-right: 0 !important;
 }
 
 .color-chip {
@@ -2077,6 +2147,24 @@ button .loading-spinner-small {
     cursor: pointer;
     transition: all .2s;
     position: relative
+}
+
+/* CSV 확인 표시 */
+.csv-confirmed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: #e3f2fd;
+  color: #1976d2;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.csv-confirmed-badge::before {
+  content: '✓';
+  margin-right: 4px;
 }
 
 .stock-status-btn.csv-confirmed {
@@ -5439,7 +5527,7 @@ body.sticky-footer-active {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 8px 16px;
+    padding: 4px 16px;
     min-width: 120px;
     height: auto;
     line-height: 1.2;
@@ -5512,7 +5600,7 @@ body.sticky-footer-active {
 }
 
 .shipped-badge {
-  background-color: #28a745;
+  background-color: #910000;
   color: white;
   padding: 2px 8px;
   border-radius: 12px;
@@ -6100,6 +6188,7 @@ body.sticky-footer-active {
     padding: 8px 12px;
     background: white;
     border-radius: 6px;
+    box-shadow: 0 0 3px #bcbcbc;
 }
 
 .box-icon {
