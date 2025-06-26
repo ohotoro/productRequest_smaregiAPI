@@ -8139,6 +8139,7 @@ function updateSmaregiStatus() {
       statusText.textContent = 'API 확인 실패';
       AppState.smaregiConnected = false;
     })
+    .checkSmaregiConnection();
 }
 
 // scripts.html의 Smaregi 관련 최적화된 코드
