@@ -4567,30 +4567,6 @@ function getSmaregiData() {
 }
 
 /**
- * Smaregi API 사용 가능 여부 확인
- * @returns {boolean} 사용 가능 여부
- */
-function isSmaregiAvailable() {
-  try {
-    // Platform API 설정 확인
-    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
-      const config = getCurrentConfig();
-      return !!(config.CLIENT_ID && config.CLIENT_SECRET);
-    }
-    
-    // Legacy API 설정 확인 (있다면)
-    const userProps = PropertiesService.getUserProperties();
-    const apiKey = userProps.getProperty('SMAREGI_API_KEY');
-    
-    return !!apiKey;
-    
-  } catch (error) {
-    console.error('Smaregi 사용 가능 여부 확인 실패:', error);
-    return false;
-  }
-}
-
-/**
  * 개별 상품의 판매 데이터 조회 (웹앱에서 사용)
  * @param {string} barcode - 상품 바코드
  * @returns {Object} 판매 데이터
@@ -4676,52 +4652,6 @@ function getProductSalesData(barcode) {
 }
 
 // ===== Code.gs에 추가할 함수들 =====
-
-/**
- * 여러 바코드로 상품 조회 (프리페치용)
- */
-function getProductsByBarcodes(barcodes) {
-  if (!barcodes || barcodes.length === 0) return [];
-  
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('상품 데이터베이스');
-    if (!sheet) return [];
-    
-    const data = sheet.getDataRange().getValues();
-    const headers = data[0];
-    const barcodeIndex = headers.indexOf('バーコード');
-    
-    if (barcodeIndex === -1) return [];
-    
-    const products = [];
-    const barcodeSet = new Set(barcodes);
-    
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const barcode = String(row[barcodeIndex]);
-      
-      if (barcodeSet.has(barcode)) {
-        const product = {};
-        headers.forEach((header, index) => {
-          product[header] = row[index];
-        });
-        products.push(product);
-        
-        // 찾은 바코드는 제거 (중복 방지)
-        barcodeSet.delete(barcode);
-        
-        // 모두 찾았으면 종료
-        if (barcodeSet.size === 0) break;
-      }
-    }
-    
-    return products;
-    
-  } catch (error) {
-    console.error('상품 일괄 조회 실패:', error);
-    return [];
-  }
-}
 
 /**
  * 초기 데이터 번들 (최적화)
