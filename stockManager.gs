@@ -1,58 +1,5 @@
 // ===== 재고 관리 함수 stockManager.gs =====
 
-// CSV 라인 파싱 - 강력한 버전
-function parseCSVLineRobust(line) {
-  // Papa Parse 스타일의 CSV 파싱
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  let i = 0;
-  
-  // 전체 줄이 따옴표로 감싸여 있으면 제거
-  if (line.startsWith('"') && line.endsWith('"') && line.charAt(1) !== '"') {
-    line = line.substring(1, line.length - 1);
-  }
-  
-  while (i < line.length) {
-    const char = line[i];
-    
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          // 이스케이프된 따옴표
-          current += '"';
-          i += 2;
-        } else {
-          // 따옴표 종료
-          inQuotes = false;
-          i++;
-        }
-      } else {
-        current += char;
-        i++;
-      }
-    } else {
-      if (char === '"') {
-        // 따옴표 시작
-        inQuotes = true;
-        i++;
-      } else if (char === ',') {
-        // 필드 구분자
-        result.push(current.trim());
-        current = '';
-        i++;
-      } else {
-        current += char;
-        i++;
-      }
-    }
-  }
-  
-  // 마지막 필드
-  result.push(current.trim());
-  
-  return result;
-}
 
 // 기존 CSV 라인 파싱 (폴백용)
 function parseCSVLine(line) {
