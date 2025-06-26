@@ -291,6 +291,50 @@ function bulkUpdateSafetyStock(updates) {
   }
 }
 
+// 캐싱된 안전재고 조회
+function getSafetyStocks() {
+  try {
+    // 캐시 확인
+    const cached = getCache(CACHE_KEYS.SAFETY_STOCK);
+    if (cached) {
+      return cached;
+    }
+    
+    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
+    const sheet = ss.getSheetByName('안전재고');
+    
+    if (!sheet || sheet.getLastRow() <= 1) {
+      return {};
+    }
+    
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+    const safetyStocks = {};
+    
+    data.forEach(row => {
+      if (row[0]) {
+        const barcode = String(row[0]);
+        const type = row[2];
+        const value = row[3];
+        
+        if (type === 'percentage') {
+          safetyStocks[barcode] = { type: 'percentage', value: value };
+        } else {
+          safetyStocks[barcode] = parseInt(value) || 0;
+        }
+      }
+    });
+    
+    // 캐시 저장 (5분)
+    setCache(CACHE_KEYS.SAFETY_STOCK, safetyStocks, 300);
+    
+    return safetyStocks;
+    
+  } catch (error) {
+    console.error('안전재고 조회 실패:', error);
+    return {};
+  }
+}
+
 // 안전재고 통계
 function getSafetyStockStats() {
   try {
