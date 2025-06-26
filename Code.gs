@@ -4742,20 +4742,38 @@ function getInitialDataBundle() {
     const bundle = {
       timestamp: new Date().toISOString(),
       settings: getSettings(),
-      translations: loadTranslations((getSettings().language || 'japanese')),
+      translations: loadTranslations((getSettings().language || 'korean')),
       currentOrder: checkCurrentOrder(),
       categoryRules: getCachedCategoryRules(),
       smaregiData: null,
-      products: null
+      products: null  // 기본값 null
     };
     
     // 상품 데이터 로드
-    const productsData = loadInitialProductsWithIssues();
-    bundle.products = {
-      data: productsData.products,
-      withIssues: productsData.withIssues,
-      totalCount: productsData.totalCount
-    };
+    try {
+      const productsData = loadInitialProductsWithIssues();
+      if (productsData && productsData.products) {
+        bundle.products = {
+          data: productsData.products || [],
+          withIssues: productsData.withIssues || [],
+          totalCount: productsData.totalCount || 0
+        };
+      } else {
+        // 실패 시 빈 데이터
+        bundle.products = {
+          data: [],
+          withIssues: [],
+          totalCount: 0
+        };
+      }
+    } catch (e) {
+      console.error('상품 데이터 로드 실패:', e);
+      bundle.products = {
+        data: [],
+        withIssues: [],
+        totalCount: 0
+      };
+    }
     
     // Smaregi 데이터
     const smaregiData = getSmaregiData();
@@ -4781,8 +4799,13 @@ function getInitialDataBundle() {
     
   } catch (error) {
     console.error('번들 생성 실패:', error);
-    // 실패시 개별 로드로 폴백
-    return null;
+    // 실패시에도 최소한의 구조는 반환
+    return {
+      timestamp: new Date().toISOString(),
+      products: { data: [], withIssues: [], totalCount: 0 },
+      settings: {},
+      translations: {}
+    };
   }
 }
 
