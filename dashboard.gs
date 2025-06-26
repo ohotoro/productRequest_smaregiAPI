@@ -560,22 +560,6 @@ function getOrderDataForCurrentMonth() {
   });
 }
 
-// 최근 발주된 바코드 목록
-function getRecentOrderedBarcodes(days) {
-  const barcodes = new Set();
-  const orderData = getOrderDataForPeriod(days / 30);
-  
-  orderData.forEach(({data}) => {
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0]) {
-        barcodes.add(String(data[i][0]));
-      }
-    }
-  });
-  
-  return barcodes;
-}
-
 // 특정 월의 상품별 발주량
 function getProductDataForMonth(monthsAgo) {
   const targetDate = new Date();
