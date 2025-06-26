@@ -755,7 +755,6 @@ async function loadInitialDataWithBundle() {
 }
 
 // 번들 데이터 적용
-// 번들 데이터 적용 - 완전한 null 체크 버전
 function applyBundleData(bundle) {
   // 번들이 null이거나 undefined인 경우 바로 리턴
   if (!bundle) {
@@ -1171,7 +1170,7 @@ async function loadInitialProductsWithIssuesAsync() {
     google.script.run
       .withSuccessHandler((result) => {
         clearTimeout(timeout);
-        if (result.products) {
+        if (result && result.products) {
           AppState.products = result.products;
           AppState.productIssues = result.productIssues || {};
           
@@ -2487,7 +2486,9 @@ function displaySearchResults(results) {
                          style="cursor: pointer;">⚠️</span>`;
     }
     
-    const existingOrder = AppState.orderItems.find(item => item.barcode === product.barcode);
+    const existingItems = AppState.orderItems.filter(item => item.barcode === product.barcode);
+    const confirmedItem = existingItems.find(item => item.status === '확정');
+    const unconfirmedItem = existingItems.find(item => item.status !== '확정');
     const storeStock = smaregiData[product.barcode];
     
     // 재고 표시 개선
@@ -2534,39 +2535,45 @@ function displaySearchResults(results) {
     
     // 버튼 HTML
     let buttonHtml = '';
-    if (existingOrder) {
-      if (existingOrder.confirmed) {
-        const hasUnconfirmed = AppState.orderItems.some(item => 
-          item.barcode === product.barcode && !item.confirmed
-        );
-        
-        if (!hasUnconfirmed) {
-          buttonHtml = `
-            <button class="add-to-order-btn confirmed" 
-                    onclick="addDuplicateConfirmed('${product.barcode}', this)"
-                    title="이미 확정된 항목입니다. 추가 발주하시려면 클릭하세요.">
-              확정됨
-            </button>
-          `;
-        } else {
-          buttonHtml = `
-            <button class="add-to-order-btn added" 
-                    onclick="focusOrderItem('${product.barcode}')">
-              추가됨
-            </button>
-          `;
-        }
-      } else {
-        buttonHtml = `
-          <button class="add-to-order-btn added" 
-                  onclick="focusOrderItem('${product.barcode}')">
-            추가됨
-          </button>
-        `;
-      }
-    } else {
-      buttonHtml = `<button class="add-to-order-btn" onclick="addToOrderWithData('${product.barcode}', this)">발주추가</button>`;
-    }
+let totalQuantity = 0;
+
+if (confirmedItem && unconfirmedItem) {
+  // 확정과 미확정 둘 다 있는 경우
+  totalQuantity = confirmedItem.quantity + unconfirmedItem.quantity;
+  buttonHtml = `
+    <div class="search-item-button-group">
+      <button class="add-to-order-btn already-added has-both" onclick="addToOrderWithData('${product.barcode}', this)">
+        <span class="btn-main-text">추가 (${totalQuantity})</span>
+        <span class="btn-sub-text">확정 ${confirmedItem.quantity} + 대기 ${unconfirmedItem.quantity}</span>
+      </button>
+    </div>
+  `;
+} else if (confirmedItem) {
+  // 확정만 있는 경우
+  buttonHtml = `
+    <div class="search-item-button-group">
+      <button class="add-to-order-btn confirmed-only" onclick="addDuplicateConfirmed('${product.barcode}', this)">
+        <span class="btn-main-text">재추가</span>
+        <span class="btn-sub-text">확정 ${confirmedItem.quantity}개</span>
+      </button>
+    </div>
+  `;
+} else if (unconfirmedItem) {
+  // 미확정만 있는 경우
+  totalQuantity = unconfirmedItem.quantity;
+  buttonHtml = `
+    <button class="add-to-order-btn already-added" onclick="addToOrderWithData('${product.barcode}', this)">
+      추가 (${totalQuantity})
+    </button>
+  `;
+} else {
+  // 발주 목록에 없는 경우
+  buttonHtml = `
+    <button class="add-to-order-btn" onclick="addToOrderWithData('${product.barcode}', this)">
+      추가
+    </button>
+  `;
+}
     
     // 색상/사이즈 HTML
     let colorSizeHtml = '';
@@ -3254,16 +3261,6 @@ function loadSalesInfo(barcode, iconElement) {
     .getProductSalesData(barcode);
 }
 
-// 확정된 항목 재추가 함수 (displaySearchResults 함수 바로 다음에 추가)
-function addDuplicateConfirmed(barcode, button) {
-  console.log('addDuplicateConfirmed 호출됨:', barcode); // 디버깅용
-  
-  if (confirm('이미 확정된 항목입니다.\n추가로 발주하시겠습니까?')) {
-    // 새로운 미확정 항목으로 추가
-    addToOrderWithData(barcode, button);
-  }
-}
-
 // 발주 목록의 특정 아이템으로 스크롤 및 하이라이트
 function focusOrderItem(barcode) {
   const orderItems = document.querySelectorAll('.order-item');
@@ -3371,6 +3368,41 @@ function proceedAddToOrder(product, addBtn) {
   addBtn.disabled = true;
   addBtn.style.cursor = 'wait';
   
+  // === 여기부터 추가 ===
+  // 기존 항목 전체 확인
+  const existingItems = AppState.orderItems.filter(item => 
+    item.barcode === product.barcode
+  );
+  
+  if (existingItems.length > 0) {
+    const confirmedItem = existingItems.find(item => item.status === '확정');
+    const unconfirmedItem = existingItems.find(item => item.status !== '확정');
+    
+    // 확정된 항목이 있으면 경고
+    if (confirmedItem) {
+      // 버튼 원상복구
+      addBtn.classList.remove('adding');
+      addBtn.textContent = '발주 추가';
+      addBtn.disabled = false;
+      addBtn.style.cursor = 'pointer';
+      
+      let message = confirmedItem && unconfirmedItem ? 
+        `이미 발주목록에 있습니다.\n확정: ${confirmedItem.quantity}개, 대기: ${unconfirmedItem.quantity}개\n추가로 발주하시겠습니까?` :
+        `이미 확정된 항목입니다. (${confirmedItem.quantity}개)\n추가로 발주하시겠습니까?`;
+      
+      if (!confirm(message)) {
+        return; // 취소하면 여기서 종료
+      }
+      
+      // 확인했으면 계속 진행
+      addBtn.classList.add('adding');
+      addBtn.textContent = '추가중...';
+      addBtn.disabled = true;
+    }
+  }
+  // === 여기까지 추가 ===
+  
+  // 기존 코드 그대로 유지
   const existingUnconfirmed = AppState.orderItems.find(item => 
     item.barcode === product.barcode && item.status !== '확정'
   );
@@ -3401,6 +3433,7 @@ function proceedAddToOrder(product, addBtn) {
     return;
   }
   
+  // 새 항목 추가 - 기존 코드 그대로
   const newItem = {
     ...product,
     quantity: 1,
@@ -3415,10 +3448,10 @@ function proceedAddToOrder(product, addBtn) {
   AppState.orderItems.push(newItem);
   updateOrderList();
   
-  // 최근 사용 업데이트
+  // 최근 사용 업데이트 - 중요!
   google.script.run.updateSharedRecentProducts(product);
   
-  // 로컬 캐시 저장
+  // 로컬 캐시 저장 - 중요!
   try {
     let localCache = localStorage.getItem('recentAddedProducts');
     localCache = localCache ? JSON.parse(localCache) : [];
@@ -6921,13 +6954,10 @@ function processCSVUpload() {
   google.script.run
     .withSuccessHandler(function(result) {
       if (result.success) {
-        showQuickSuccess(`${result.itemCount}개 재고 정보가 업로드되었습니다.`);
+        updateLoadingMessage(`재고 정보를 발주서에 적용 중...`);
         
-        // 재고 데이터 로드 후 발주 항목 업데이트
-        updateLoadingMessage('재고 정보를 적용하는 중...');
-        
-        // 발주 항목의 재고 상태 업데이트
-        updateOrderItemsWithStockBatch(updateType);
+        // 재고 상태 업데이트 및 즉시 저장
+        updateOrderItemsAndSave(updateType, result.itemCount);
       } else {
         hideLoading();
         showError('CSV 처리 실패: ' + (result.error || '알 수 없는 오류'));
@@ -6938,6 +6968,62 @@ function processCSVUpload() {
       showError('업로드 실패: ' + error);
     })
     .processStockCSV(AppState.uploadedCSVContent, updateType);
+}
+
+function updateOrderItemsAndSave(updateType, uploadedCount) {
+  const itemsToUpdate = AppState.orderItems.filter(item => {
+    if (item.exportedAt || item.exportStatus) return false;
+    if (updateType === 'confirmed' && item.status !== '확정') return false;
+    if (updateType === 'unconfirmed' && item.status === '확정') return false;
+    return true;
+  });
+  
+  if (itemsToUpdate.length === 0) {
+    hideLoading();
+    showInfo('업데이트할 항목이 없습니다.');
+    return;
+  }
+  
+  // 서버에 일괄 업데이트 요청
+  google.script.run
+    .withSuccessHandler(function(results) {
+      // 결과를 로컬 데이터에 반영
+      results.forEach(result => {
+        const item = AppState.orderItems.find(i => i.id === result.id);
+        if (item) {
+          item.stockAvailable = result.stockStatus.message;
+          item.stockStatus = result.stockStatus.status;
+          item.csvConfirmed = true;
+        }
+      });
+      
+      // UI 업데이트
+      updateOrderList();
+      
+      // 즉시 저장
+      updateLoadingMessage('발주서 저장 중...');
+      
+      google.script.run
+        .withSuccessHandler(function(saveResult) {
+          hideLoading();
+          if (saveResult.success) {
+            showQuickSuccess(`${uploadedCount}개 재고 정보가 업데이트되고 저장되었습니다.`);
+            AppState.hasUnsavedChanges = false;
+          } else {
+            showError('저장 실패: ' + saveResult.message);
+          }
+        })
+        .withFailureHandler(function(error) {
+          hideLoading();
+          showError('저장 실패: ' + error);
+        })
+        .saveToOrderSheetWithVersion(AppState.orderItems);
+    })
+    .withFailureHandler(function(error) {
+      hideLoading();
+      showError('재고 업데이트 실패: ' + error);
+    })
+    .updateOrderItemsStock(itemsToUpdate, updateType);
 }
 
 // 서버에서 재고 데이터 로드
@@ -11620,7 +11706,7 @@ function refreshSmaregiConnection() {
       showSaveIndicator('hide');
       showError('연결 실패: ' + error);
     })
-    .syncSmaregiData();
+    .manualSyncSmaregiData();
 }
 
 // 자동 발주 제안 표시
