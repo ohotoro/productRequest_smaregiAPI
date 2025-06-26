@@ -539,7 +539,7 @@ function initializeAPIConnection() {
 /**
  * 수동 재고 동기화 (웹앱에서 호출)
  */
-function syncSmaregiData() {
+function manualSyncSmaregiData() {
   try {
     console.log('=== 수동 재고 동기화 시작 ===');
     
