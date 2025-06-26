@@ -1,18 +1,4 @@
 // ===== 발주처 관리 함수 =====
-
-// 현재 발주서 정보 가져오기
-function getCurrentOrder() {
-  try {
-    const userProperties = PropertiesService.getUserProperties();
-    const currentOrder = userProperties.getProperty('currentOrder');
-    
-    return currentOrder ? JSON.parse(currentOrder) : null;
-  } catch (error) {
-    console.error('현재 발주서 정보 조회 실패:', error);
-    return null;
-  }
-}
-
 // 발주처 목록 가져오기 (캐시 적용)
 function getOrderRecipientsList() {
   try {
