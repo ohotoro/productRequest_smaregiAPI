@@ -653,27 +653,6 @@ function clearAllSmaregiCache() {
   }
 }
 
-// getCurrentConfig 함수 - Platform API 설정 가져오기
-function getCurrentConfig() {
-  if (!CONFIG || !CONFIG.PLATFORM_CONFIG) {
-    console.error('PLATFORM_CONFIG가 설정되지 않았습니다');
-    throw new Error('PLATFORM_CONFIG が設定されていません');
-  }
-  
-  const config = CONFIG.PLATFORM_CONFIG;
-  const isProduction = config.USE_PRODUCTION;
-  
-  return {
-    CONTRACT_ID: isProduction ? config.PROD_CONTRACT_ID : config.DEV_CONTRACT_ID,
-    CLIENT_ID: isProduction ? config.PROD_CLIENT_ID : config.DEV_CLIENT_ID,
-    CLIENT_SECRET: isProduction ? config.PROD_CLIENT_SECRET : config.DEV_CLIENT_SECRET,
-    TOKEN_URL: isProduction ? config.PROD_TOKEN_URL : config.DEV_TOKEN_URL,
-    API_BASE_URL: isProduction ? config.PROD_API_BASE_URL : config.DEV_API_BASE_URL,
-    SCOPES: config.SCOPES,
-    ENVIRONMENT: isProduction ? '本番環境' : '開発環境'
-  };
-}
-
 // smaregiPlatformAPI.gs - 완전한 판매 데이터 조회 함수
 function getPlatformSalesDataComplete(days = 30) {
   try {
