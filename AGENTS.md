@@ -37,7 +37,10 @@ function setupTriggers() {
 ### 2. Smaregi 동기화 에이전트
 - **파일**: `smaregiManager.gs`
 - **함수**: `syncSmaregiData()`
-- **주기**: 30분마다
+- **실행 타이밍**:
+  - **자동**: 30분마다 (트리거)
+  - **수동**: "지금 동기화" 버튼 클릭
+  - **접속 시**: 웹앱 초기화 시 (캐시가 10분 이상 오래된 경우)
 - **역할**:
   - Smaregi API에서 재고 데이터 가져오기
   - 캐시 무효화 (SMAREGI_DATA, DASHBOARD_DATA)
@@ -183,6 +186,37 @@ function resetAllTriggers() {
 ```
 
 ## 💡 실제 구현 예시
+
+### 웹앱 접속 시 동기화
+```javascript
+// scripts.html - 초기화 시 캐시 확인 및 동기화
+async function checkAndSyncSmaregiData() {
+  const lastSync = localStorage.getItem('lastSmaregiSync');
+  const now = Date.now();
+  
+  // 10분 이상 지났으면 동기화
+  if (!lastSync || (now - parseInt(lastSync)) > 10 * 60 * 1000) {
+    console.log('Smaregi 데이터 오래됨, 동기화 시작');
+    
+    await google.script.run
+      .withSuccessHandler((result) => {
+        if (result.success) {
+          localStorage.setItem('lastSmaregiSync', now.toString());
+          console.log('접속 시 동기화 완료');
+        }
+      })
+      .syncSmaregiData();
+  }
+}
+
+// 초기화 함수에 추가
+document.addEventListener('DOMContentLoaded', async function() {
+  // ... 기존 초기화 코드
+  
+  // Smaregi 자동 동기화 체크
+  await checkAndSyncSmaregiData();
+});
+```
 
 ### 자주 발주 상품 업데이트 로직
 ```javascript
