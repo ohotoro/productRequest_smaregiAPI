@@ -31,11 +31,11 @@ function getBatchSalesData(barcodes, days = 30) {
         
         // 판매 데이터 조회
         const salesResult = getSimpleSalesDataV2(days);
-        
-        // 결과 데이터 생성 - 바코드를 productCode로 직접 사용
+                // 바코드 -> 제품코드 매핑
+        const barcodeMap = getBarcodeToProductCodeMapping();
         const results = barcodes.map(barcode => {
           // 바코드를 productCode로 직접 사용
-          const productCode = barcode;
+          const productCode = barcodeMap[barcode] || barcode;
           let salesData = null;
           
           // 판매 데이터가 있는 경우
@@ -711,5 +711,23 @@ function getProductSalesInfo(barcode) {
   } catch (error) {
     console.error('개별 판매 정보 조회 실패:', error);
     return null;
+  }
+}
+
+/**
+ * 바코드에서 제품코드 매핑 가져오기
+ * @returns {Object} 매핑 객체
+ */
+function getBarcodeToProductCodeMapping() {
+  try {
+    const barcodes = getProductBarcodes();
+    const mapping = {};
+    barcodes.forEach(bc => {
+      mapping[bc] = bc;
+    });
+    return mapping;
+  } catch (error) {
+    console.error('바코드 매핑 로드 실패:', error);
+    return {};
   }
 }
