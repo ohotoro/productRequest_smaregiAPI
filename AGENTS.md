@@ -1,101 +1,239 @@
 # Agent 구성 가이드
 
-이 프로젝트의 자동화 에이전트들을 설명합니다.
+프로젝트의 자동화 에이전트(트리거)를 설명합니다.
 
 ## 📋 개요
 
-Agent는 백그라운드에서 실행되는 자동화 작업들로, Google Apps Script의 트리거를 사용해 스케줄링됩니다.
+Agent는 Google Apps Script의 트리거를 사용해 백그라운드에서 자동 실행되는 작업들입니다.
 
-## 🤖 에이전트 종류
+## 🤖 실제 구현된 에이전트
 
-### 1. Smaregi 동기화 에이전트
-- **함수**: `syncSmaregiData()`
-- **주기**: 30분마다
-- **역할**: 
-  - Smaregi API에서 최신 재고 데이터 가져오기
-  - 캐시 무효화 및 갱신
-  - 재고 부족 알림 확인
-
-### 2. 캐시 워밍 에이전트
-- **함수**: `scheduledCacheWarming()`, `peakTimeCacheWarming()`
-- **주기**: 
-  - 매일 새벽 3시 (전체)
-  - 오전 9시, 오후 2시 (부분)
-- **역할**:
-  - 자주 사용하는 데이터 미리 캐싱
-  - 응답 속도 최적화
-
-### 3. 자주 발주 상품 업데이트
+### 1. 자주 발주 상품 캐시 업데이트
+- **파일**: `trigger.gs`
 - **함수**: `updateFrequentProductsCache()`
 - **주기**: 매일 새벽 2시
-- **역할**:
-  - 발주 빈도 분석
-  - 자주 발주 상품 목록 갱신
+- **역할**: 
+  - 자주 발주하는 바코드 목록 갱신
+  - PropertiesService에 캐시 저장
+  - 업데이트 시간 기록
 
-## ⚙️ 설정 방법
-
-### 트리거 초기 설정
 ```javascript
-// 모든 트리거 한번에 설정
-function setupAllTriggers() {
-  setupTriggers();           // 기본 트리거
-  setupSmaregiTriggers();    // Smaregi 동기화
-  CacheWarmingScheduler.setupSchedule(); // 캐시 워밍
-}
-```
-
-### 개별 트리거 관리
-```javascript
-// Smaregi 동기화 간격 변경 (기본: 30분)
-function changeSmaregiSyncInterval(minutes) {
+// trigger.gs
+function setupTriggers() {
   // 기존 트리거 삭제
-  ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'syncSmaregiData')
-    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    ScriptApp.deleteTrigger(trigger);
+  });
   
-  // 새 트리거 생성
-  ScriptApp.newTrigger('syncSmaregiData')
+  // 매일 새벽 2시에 자주 발주 상품 업데이트
+  ScriptApp.newTrigger('updateFrequentProductsCache')
     .timeBased()
-    .everyMinutes(minutes)
+    .everyDays(1)
+    .atHour(2)
     .create();
 }
 ```
 
-## 📊 모니터링
+### 2. Smaregi 동기화 에이전트
+- **파일**: `smaregiManager.gs`
+- **함수**: `syncSmaregiData()`
+- **주기**: 30분마다
+- **역할**:
+  - Smaregi API에서 재고 데이터 가져오기
+  - 캐시 무효화 (SMAREGI_DATA, DASHBOARD_DATA)
+  - 동기화 시간 업데이트
+  - 재고 부족 항목 확인
 
-### 실행 로그 확인
-1. Apps Script 에디터 > 실행 > 로그 확인
-2. 각 에이전트는 실행 시 로그 남김
-
-### 실행 상태 확인
 ```javascript
-function checkAgentStatus() {
+// smaregiManager.gs
+function setupSmaregiTriggers() {
+  // 기존 트리거 삭제
   const triggers = ScriptApp.getProjectTriggers();
-  return triggers.map(trigger => ({
-    함수: trigger.getHandlerFunction(),
-    타입: trigger.getEventType(),
-    다음실행: trigger.getTriggerSource()
-  }));
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'syncSmaregiData') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  
+  // 30분마다 동기화
+  ScriptApp.newTrigger('syncSmaregiData')
+    .timeBased()
+    .everyMinutes(30)
+    .create();
 }
+```
+
+### 3. 캐시 워밍 에이전트
+- **파일**: `advancedCache.gs`
+- **함수**: 
+  - `scheduledCacheWarming()` - 전체 캐시 워밍
+  - `peakTimeCacheWarming()` - 부분 캐시 워밍
+- **주기**:
+  - 전체: 매일 새벽 3시
+  - 부분: 오전 9시, 오후 2시
+- **역할**:
+  - 자주 사용하는 상품 데이터 미리 캐싱
+  - 최근 발주 상품 캐싱
+  - 안전재고 설정 상품 캐싱
+
+```javascript
+// advancedCache.gs
+setupSchedule() {
+  // 매일 새벽 3시에 캐시 워밍
+  ScriptApp.newTrigger('scheduledCacheWarming')
+    .timeBased()
+    .everyDays(1)
+    .atHour(3)
+    .create();
+  
+  // 피크 시간 전 캐시 워밍
+  ScriptApp.newTrigger('peakTimeCacheWarming')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+  
+  ScriptApp.newTrigger('peakTimeCacheWarming')
+    .timeBased()
+    .everyDays(1)
+    .atHour(14)
+    .create();
+}
+```
+
+## ⚙️ 설정 방법
+
+### 모든 트리거 초기 설정
+```javascript
+// 각 트리거 설정 함수 실행
+function setupAllTriggers() {
+  setupTriggers();                      // 자주 발주 상품
+  setupSmaregiTriggers();               // Smaregi 동기화
+  CacheWarmingScheduler.setupSchedule(); // 캐시 워밍
+}
+```
+
+### 트리거 확인
+```javascript
+// 현재 설정된 트리거 목록
+function listTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => {
+    console.log({
+      함수: trigger.getHandlerFunction(),
+      타입: trigger.getEventType(),
+      소스: trigger.getTriggerSource()
+    });
+  });
+}
+```
+
+## 📊 동작 확인
+
+### 1. 자주 발주 상품 캐시
+```javascript
+// 수동 실행으로 테스트
+updateFrequentProductsCache();
+
+// 캐시 확인
+const props = PropertiesService.getUserProperties();
+const cached = props.getProperty('frequentBarcodes');
+console.log('캐시된 바코드 수:', JSON.parse(cached).length);
+```
+
+### 2. Smaregi 동기화 상태
+```javascript
+// 마지막 동기화 시간 확인
+const scriptProps = PropertiesService.getScriptProperties();
+const lastSync = scriptProps.getProperty('SMAREGI_LAST_SYNC');
+console.log('마지막 동기화:', lastSync);
+```
+
+### 3. 캐시 워밍 결과
+```javascript
+// 수동 실행으로 테스트
+scheduledCacheWarming();
+
+// 캐시 통계 확인
+const stats = AdvancedCacheManager.getStats();
+console.log('캐시 적중률:', stats.hitRate);
 ```
 
 ## 🚨 문제 해결
 
 ### 트리거가 실행되지 않을 때
-1. Apps Script 실행 할당량 확인
-2. 권한 설정 확인
-3. 에러 로그 확인
+1. Apps Script 에디터 > 실행 로그 확인
+2. 실행 권한 확인
+3. 일일 할당량 확인
 
-### 재설정
+### 트리거 재설정
 ```javascript
-// 모든 트리거 제거 후 재설정
+// 모든 트리거 삭제 후 재설정
 function resetAllTriggers() {
   // 모든 트리거 삭제
   ScriptApp.getProjectTriggers()
     .forEach(t => ScriptApp.deleteTrigger(t));
   
+  console.log('모든 트리거 삭제 완료');
+  
   // 재설정
   setupAllTriggers();
+  console.log('트리거 재설정 완료');
+}
+```
+
+## 💡 실제 구현 예시
+
+### 자주 발주 상품 업데이트 로직
+```javascript
+// trigger.gs의 실제 구현
+function updateFrequentProductsCache() {
+  try {
+    console.log('자주 발주 상품 캐시 업데이트 시작');
+    
+    // 자주 발주 바코드 목록 갱신
+    const frequentBarcodes = getFrequentProductBarcodes();
+    
+    // PropertiesService에 저장
+    const userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('frequentBarcodes', JSON.stringify(frequentBarcodes));
+    userProperties.setProperty('frequentBarcodesUpdated', new Date().toISOString());
+    
+    console.log(`${frequentBarcodes.length}개 자주 발주 상품 캐시 완료`);
+    
+  } catch (error) {
+    console.error('캐시 업데이트 실패:', error);
+  }
+}
+```
+
+### Smaregi 동기화 로직
+```javascript
+// smaregiManager.gs의 실제 구현
+function syncSmaregiData() {
+  try {
+    console.log('=== Smaregi 자동 동기화 시작 ===');
+    
+    // 재고 데이터 새로고침
+    const stockData = getSmaregiStockData();
+    if (!stockData.success) {
+      console.error('자동 동기화 실패:', stockData.error);
+      return;
+    }
+    
+    // 캐시 무효화
+    invalidateCache(CACHE_KEYS.SMAREGI_DATA);
+    invalidateCache(CACHE_KEYS.DASHBOARD_DATA);
+    
+    // 동기화 시간 업데이트
+    const scriptProps = PropertiesService.getScriptProperties();
+    scriptProps.setProperty('SMAREGI_LAST_SYNC', new Date().toISOString());
+    
+    console.log(`자동 동기화 완료: ${stockData.count}개 항목`);
+    
+  } catch (error) {
+    console.error('자동 동기화 오류:', error);
+  }
 }
 ```
 
@@ -103,23 +241,6 @@ function resetAllTriggers() {
 
 - 트리거는 사용자별로 설정됨
 - 실행 시간 제한: 6분
-- 일일 실행 할당량 존재
+- 일일 실행 할당량 제한 있음
 - 동시 실행 방지 로직 필요
-
-## 🔧 커스터마이징
-
-### 새 에이전트 추가
-```javascript
-// 예: 일일 리포트 생성 에이전트
-function dailyReportAgent() {
-  console.log('일일 리포트 생성 시작');
-  // 리포트 생성 로직
-}
-
-// 트리거 설정
-ScriptApp.newTrigger('dailyReportAgent')
-  .timeBased()
-  .everyDays(1)
-  .atHour(22)  // 오후 10시
-  .create();
-```
+- 주석 처리된 이메일 알림 기능은 필요시 활성화 가능
