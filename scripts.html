@@ -2853,22 +2853,22 @@ function createSalesBadge(barcode, salesData) {
       level = 'none';
       icon = '—';
       text = '판매 없음';
-    } else if (totalQty >= hotThreshold) {
-      level = 'hot';
-      icon = '🔥';
-      text = '인기 상품';
-    } else if (totalQty >= popularThreshold) {
-      level = 'popular';
-      icon = '⭐';
-      text = '판매 양호';
-    } else if (totalQty >= normalThreshold) {
-      level = 'normal';
-      icon = '📊';
-      text = '일반 판매';
-    } else {
-      level = 'slow';
-      icon = '🐌';
-      text = '판매 부진';
+      if (totalQty >= hotThreshold) {
+        level = 'hot';
+        icon = '🔥';
+      } else if (totalQty >= popularThreshold) {
+        level = 'popular';
+        icon = '⭐';
+      } else if (totalQty >= normalThreshold) {
+        level = 'normal';
+        icon = '📊';
+      } else {
+        level = 'slow';
+        icon = '🐌';
+      }
+
+      // 실제 판매 수량 표시
+      text = `${totalQty}건`;
     }
     
     // 추세 클래스
@@ -2883,6 +2883,7 @@ function createSalesBadge(barcode, salesData) {
       data-period="${longPeriod}"
       data-total="${totalQty}"
       data-avg="${avgDaily}"
+      data-loaded="true"
       title="${longPeriod}일간 ${totalQty}개 판매 (일평균 ${avgDaily}개)">
       <span class="sales-icon">${icon}</span>
       <span class="sales-text">${text}</span>
@@ -2897,7 +2898,7 @@ function createSalesBadge(barcode, salesData) {
     data-trend="stable"
     data-period="${longPeriod}"
     data-total="0"
-    data-avg="0">
+    data-avg="0" data-loaded="true">
     <span class="sales-icon">—</span>
     <span class="sales-text">판매 없음</span>
   </span>`;
@@ -2927,6 +2928,16 @@ function showSalesTooltipModal(e) {
   
   const badge = e.currentTarget;
   const barcode = badge.dataset.barcode;
+    if (badge.dataset.loaded !== 'true') {
+    const icon = badge.querySelector('.sales-icon');
+    if (icon) {
+      loadSalesInfo(barcode, icon, () => {
+        // 데이터 로드 후 툴팁을 다시 표시
+        hideSalesTooltipModal();
+        showSalesTooltipModal({ currentTarget: badge });
+      });
+    }
+  }
   const total = badge.dataset.total || '0';
   const avg = badge.dataset.avg || '0';
   const trend = badge.dataset.trend || 'stable';
@@ -3207,18 +3218,27 @@ function updateStockBadge(barcode, stockInfo) {
 function initializeSalesInfoHandlers() {
   document.querySelectorAll('.sales-icon').forEach(icon => {
     icon.style.display = 'inline-flex';
+
+    const badge = icon.closest('.badge-sales');
+    if (badge) {
+      // 배지의 바코드를 아이콘에도 저장
+      icon.dataset.barcode = badge.dataset.barcode;
+    }
     
     // 마우스 오버 시 판매 정보 로드
     icon.addEventListener('mouseenter', function() {
-      if (!this.dataset.loaded) {
-        loadSalesInfo(this.dataset.barcode, this);
+
+      const targetBadge = this.closest('.badge-sales');
+      const bc = targetBadge ? targetBadge.dataset.barcode : this.dataset.barcode;
+      if (!this.dataset.loaded && bc) {
+        loadSalesInfo(bc, this);
       }
     });
   });
 }
 
 // 개별 판매 정보 로드
-function loadSalesInfo(barcode, iconElement) {
+function loadSalesInfo(barcode, iconElement, callback) {
   iconElement.title = '판매 정보 로딩중...';
   
   google.script.run
@@ -3229,6 +3249,22 @@ function loadSalesInfo(barcode, iconElement) {
         
         iconElement.dataset.loaded = 'true';
         iconElement.title = `최근 ${info.shortPeriod}일: ${info.lastShortDays}개\n최근 ${info.longPeriod}일: ${info.lastLongDays}개\n일평균: ${info.dailyAverage}개`;
+
+        const badge = iconElement.closest('.badge-sales');
+        if (badge) {
+          badge.dataset.total = info.lastLongDays || 0;
+          badge.dataset.avg = info.dailyAverage || 0;
+          badge.dataset.trend = info.trend || 'stable';
+
+          const textEl = badge.querySelector('.sales-text');
+          if (textEl) {
+            textEl.textContent = info.lastLongDays > 0 ? `${info.lastLongDays}건` : '판매 없음';
+          }
+
+          if (badge.matches(':hover') && currentSalesTooltipModal) {
+            showSalesTooltipModal({ currentTarget: badge });
+          }
+        }
         
         // 설정된 임계값 가져오기
         const hotThreshold = parseInt(settings.salesThresholdHot) || 20;
@@ -3253,10 +3289,12 @@ function loadSalesInfo(barcode, iconElement) {
         iconElement.title = '판매 정보 없음';
         iconElement.style.color = '#9e9e9e';
       }
+      if (typeof callback === 'function') callback();
     })
     .withFailureHandler(function(error) {
       iconElement.title = '판매 정보 로드 실패';
       iconElement.style.color = '#9e9e9e';
+      if (typeof callback === 'function') callback();
     })
     .getProductSalesData(barcode);
 }
