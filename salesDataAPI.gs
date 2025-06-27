@@ -720,11 +720,26 @@ function getProductSalesInfo(barcode) {
  */
 function getBarcodeToProductCodeMapping() {
   try {
-    const barcodes = getProductBarcodes();
+    const ss = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.PRODUCT_SHEET_NAME);
+
+    if (!sheet) {
+      throw new Error('상품 시트를 찾을 수 없습니다');
+    }
+
+    const lastRow = sheet.getLastRow();
+    const range = sheet.getRange(2, 1, lastRow - 1, PRODUCT_COLUMNS.SUPPLIER_CODE + 1);
+    const values = range.getValues();
+
     const mapping = {};
-    barcodes.forEach(bc => {
-      mapping[bc] = bc;
+    values.forEach(row => {
+      const barcode = String(row[PRODUCT_COLUMNS.BARCODE]);
+      const productCode = row[PRODUCT_COLUMNS.SUPPLIER_CODE];
+      if (barcode) {
+        mapping[barcode] = productCode ? String(productCode) : barcode;
+      }
     });
+
     return mapping;
   } catch (error) {
     console.error('바코드 매핑 로드 실패:', error);
