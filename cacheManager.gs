@@ -1,3 +1,4 @@
+
 // ===== 캐시 관리자 cacheManager.gs =====
 const CACHE_KEYS = {
   FREQUENT_BARCODES: 'frequentBarcodes',
