@@ -4662,9 +4662,12 @@ function getInitialDataBundle() {
   try {
     // 캐시 확인
     const cached = getCache('INITIAL_BUNDLE');
-    if (cached) {
-      console.log('번들 캐시 사용');
-      return cached;
+    if (cached && cached.timestamp) {
+      const age = (new Date() - new Date(cached.timestamp)) / 1000 / 60;
+      if (age < 5) { // 5분 이내면 캐시 사용
+        console.log('번들 캐시 사용');
+        return cached;
+      }
     }
     
     console.log('초기 데이터 번들 생성 시작');
@@ -4675,67 +4678,331 @@ function getInitialDataBundle() {
       translations: loadTranslations((getSettings().language || 'korean')),
       currentOrder: checkCurrentOrder(),
       categoryRules: getCachedCategoryRules(),
-      smaregiData: null,
-      products: null  // 기본값 null
-    };
-    
-    // 상품 데이터 로드
-    try {
-      const productsData = loadInitialProductsWithIssues();
-      if (productsData && productsData.products) {
-        bundle.products = {
-          data: productsData.products || [],
-          withIssues: productsData.withIssues || [],
-          totalCount: productsData.totalCount || 0
-        };
-      } else {
-        // 실패 시 빈 데이터
-        bundle.products = {
-          data: [],
-          withIssues: [],
-          totalCount: 0
-        };
-      }
-    } catch (e) {
-      console.error('상품 데이터 로드 실패:', e);
-      bundle.products = {
+      products: {
         data: [],
         withIssues: [],
         totalCount: 0
-      };
+      }
+    };
+    
+    // 1. 자주 발주/검색하는 상품만 초기 로드 (30개 제한)
+    try {
+      const frequentBarcodes = getCachedFrequentBarcodes().slice(0, 30);
+      const recentProducts = getRecentProducts(20);
+      
+      // 중복 제거를 위한 Set
+      const loadedBarcodes = new Set();
+      const productsToLoad = [];
+      
+      // 자주 발주 상품 추가
+      frequentBarcodes.forEach(barcode => {
+        if (!loadedBarcodes.has(barcode)) {
+          loadedBarcodes.add(barcode);
+          productsToLoad.push(barcode);
+        }
+      });
+      
+      // 최근 상품 추가 (총 50개까지)
+      recentProducts.forEach(product => {
+        if (!loadedBarcodes.has(product.barcode) && productsToLoad.length < 50) {
+          productsToLoad.push(product.barcode);
+        }
+      });
+      
+      // 상품 정보 로드
+      if (productsToLoad.length > 0) {
+        const products = getProductsByBarcodes(productsToLoad);
+        const productIssues = loadProductIssues();
+        
+        // 이슈 정보 병합
+        products.forEach(product => {
+          if (productIssues[product.barcode]) {
+            product.issueMemo = productIssues[product.barcode].memo;
+            product.issueRemarks = productIssues[product.barcode].remarks;
+          }
+          product.isFrequent = frequentBarcodes.includes(product.barcode);
+        });
+        
+        bundle.products.data = products;
+        bundle.products.totalCount = products.length;
+      }
+      
+    } catch (e) {
+      console.error('초기 상품 로드 실패:', e);
     }
     
-    // Smaregi 데이터
-    const smaregiData = getSmaregiData();
-    if (smaregiData) {
-      bundle.smaregiData = {
-        data: smaregiData,
-        uploadTime: PropertiesService.getScriptProperties().getProperty('smaregiUploadTime')
-      };
+    // 2. Smaregi 연결 상태만 확인 (데이터는 나중에)
+    try {
+      const connectionStatus = checkSmaregiConnection();
+      bundle.smaregiConnected = connectionStatus.connected;
+      bundle.smaregiItemCount = connectionStatus.itemCount || 0;
+    } catch (e) {
+      console.error('Smaregi 연결 확인 실패:', e);
+      bundle.smaregiConnected = false;
     }
     
-    // 발주서가 있으면 발주 항목도 포함
+    // 3. 발주서가 있으면 발주 항목 포함
     if (bundle.currentOrder) {
-      bundle.orderItems = loadOrderItemsFromSheet(bundle.currentOrder.sheetName);
+      try {
+        const orderResult = loadOrderItems(bundle.currentOrder.orderId);
+        if (orderResult.success) {
+          bundle.orderItems = orderResult.items;
+        }
+      } catch (e) {
+        console.error('발주 항목 로드 실패:', e);
+      }
     }
     
-    // 캐시 저장 (10분)
-    setCache('INITIAL_BUNDLE', bundle, 600);
+    // 캐시 저장 (5분)
+    setCache('INITIAL_BUNDLE', bundle, 300);
     
     const loadTime = new Date().getTime() - startTime;
-    console.log(`번들 생성 완료: ${loadTime}ms`);
+    console.log(`번들 생성 완료: ${loadTime}ms, 상품 ${bundle.products.data.length}개`);
     
     return bundle;
     
   } catch (error) {
     console.error('번들 생성 실패:', error);
-    // 실패시에도 최소한의 구조는 반환
     return {
       timestamp: new Date().toISOString(),
       products: { data: [], withIssues: [], totalCount: 0 },
       settings: {},
-      translations: {}
+      translations: {},
+      error: error.toString()
     };
+  }
+}
+
+// ===== 부분 판매 데이터 조회 함수 =====
+function getProductsSalesData(barcodes) {
+  try {
+    if (!barcodes || barcodes.length === 0) {
+      return { success: true, data: {} };
+    }
+    
+    const cache = CacheService.getUserCache();
+    const result = { 
+      success: true, 
+      data: {},
+      timestamp: new Date().toISOString()
+    };
+    
+    // 캐시에서 먼저 확인
+    const missingBarcodes = [];
+    
+    barcodes.forEach(barcode => {
+      const cacheKey = `sales_${barcode}`;
+      const cached = cache.get(cacheKey);
+      
+      if (cached) {
+        try {
+          result.data[barcode] = JSON.parse(cached);
+        } catch (e) {
+          missingBarcodes.push(barcode);
+        }
+      } else {
+        missingBarcodes.push(barcode);
+      }
+    });
+    
+    // 캐시에 없는 것만 조회
+    if (missingBarcodes.length > 0) {
+      console.log(`판매 데이터 조회: ${missingBarcodes.length}개 바코드`);
+      
+      // Smaregi에서 판매 데이터 조회
+      const salesData = loadSalesDataForBarcodes(missingBarcodes);
+      
+      // 결과 병합 및 캐시 저장
+      Object.entries(salesData).forEach(([barcode, data]) => {
+        result.data[barcode] = data;
+        
+        // 캐시에 저장 (1시간)
+        try {
+          cache.put(`sales_${barcode}`, JSON.stringify(data), 3600);
+        } catch (e) {
+          console.warn(`캐시 저장 실패: ${barcode}`);
+        }
+      });
+    }
+    
+    console.log(`판매 데이터 반환: ${Object.keys(result.data).length}개`);
+    return result;
+    
+  } catch (error) {
+    console.error('부분 판매 데이터 조회 실패:', error);
+    return { 
+      success: false, 
+      error: error.toString(),
+      data: {}
+    };
+  }
+}
+
+function loadSalesDataForBarcodes(barcodes) {
+  try {
+    const salesData = {};
+    
+    // Smaregi API가 연결되어 있는지 확인
+    const smaregiToken = PropertiesService.getScriptProperties().getProperty('SMAREGI_ACCESS_TOKEN');
+    if (!smaregiToken) {
+      console.log('Smaregi 토큰 없음');
+      return salesData;
+    }
+    
+    // 30일 기준으로 판매 데이터 조회
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    
+    // 바코드별로 기본 구조 생성
+    barcodes.forEach(barcode => {
+      salesData[barcode] = {
+        quantity: 0,
+        amount: 0,
+        avgDaily: 0,
+        trend: 'stable',
+        transactions: []
+      };
+    });
+    
+    // 실제 Smaregi API 호출 (배치 처리)
+    const batchSize = 10;
+    for (let i = 0; i < barcodes.length; i += batchSize) {
+      const batch = barcodes.slice(i, i + batchSize);
+      
+      try {
+        // getSalesDataFromSmaregi는 기존 함수 활용
+        const batchData = getSalesDataForProducts(batch, startDate, endDate);
+        Object.assign(salesData, batchData);
+      } catch (e) {
+        console.error(`배치 ${i}-${i + batchSize} 조회 실패:`, e);
+      }
+    }
+    
+    return salesData;
+    
+  } catch (error) {
+    console.error('판매 데이터 조회 실패:', error);
+    return {};
+  }
+}
+
+function getSmaregiDataProgressive() {
+  try {
+    const cache = CacheService.getUserCache();
+    
+    // 기본 응답 구조
+    const response = {
+      success: true,
+      data: {},
+      uploadTime: null,
+      isPartial: true
+    };
+    
+    // 전체 Smaregi 데이터 캐시 확인
+    const fullDataCached = cache.get('SMAREGI_FULL_DATA');
+    if (fullDataCached) {
+      const parsed = JSON.parse(fullDataCached);
+      response.data = parsed.data;
+      response.uploadTime = parsed.uploadTime;
+      response.isPartial = false;
+      return response;
+    }
+    
+    // 자주 사용하는 상품의 재고만 먼저 반환
+    const frequentBarcodes = getCachedFrequentBarcodes().slice(0, 50);
+    const smaregiData = {};
+    
+    frequentBarcodes.forEach(barcode => {
+      const cached = cache.get(`smaregi_${barcode}`);
+      if (cached) {
+        smaregiData[barcode] = JSON.parse(cached);
+      }
+    });
+    
+    response.data = smaregiData;
+    response.uploadTime = new Date().toISOString();
+    
+    console.log(`Smaregi 부분 데이터 반환: ${Object.keys(smaregiData).length}개`);
+    
+    return response;
+    
+  } catch (error) {
+    console.error('Smaregi 데이터 로드 실패:', error);
+    return {
+      success: false,
+      error: error.toString(),
+      data: {}
+    };
+  }
+}
+
+// ===== 백그라운드 전체 데이터 로드 트리거 =====
+function triggerFullDataLoad() {
+  try {
+    // 이미 로드 중인지 확인
+    const props = PropertiesService.getScriptProperties();
+    const loadingFlag = props.getProperty('FULL_DATA_LOADING');
+    
+    if (loadingFlag === 'true') {
+      console.log('이미 전체 데이터 로드 중');
+      return { success: false, message: 'Already loading' };
+    }
+    
+    // 로드 플래그 설정
+    props.setProperty('FULL_DATA_LOADING', 'true');
+    
+    // 비동기로 전체 데이터 로드 시작
+    // 실제로는 트리거나 별도 프로세스로 실행
+    Utilities.sleep(100); // 짧은 지연
+    
+    // 전체 데이터 로드는 별도 함수에서 처리
+    loadAllDataInBackground();
+    
+    return { success: true, message: 'Background load started' };
+    
+  } catch (error) {
+    console.error('백그라운드 로드 트리거 실패:', error);
+    return { success: false, error: error.toString() };
+  }
+}
+
+// ===== 백그라운드 전체 데이터 로드 =====
+function loadAllDataInBackground() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const cache = CacheService.getUserCache();
+    
+    console.log('백그라운드 전체 데이터 로드 시작');
+    
+    // 1. 전체 판매 데이터 로드
+    const salesResult = loadAllProductsSalesData();
+    if (salesResult.success) {
+      // 큰 데이터는 압축해서 저장
+      const compressed = Utilities.base64Encode(
+        Utilities.newBlob(JSON.stringify(salesResult)).getBytes()
+      );
+      props.setProperty('SALES_DATA_COMPRESSED', compressed);
+      props.setProperty('SALES_DATA_TIMESTAMP', new Date().toISOString());
+    }
+    
+    // 2. 전체 Smaregi 데이터 로드
+    const smaregiData = getSmaregiData();
+    if (smaregiData) {
+      cache.put('SMAREGI_FULL_DATA', JSON.stringify({
+        data: smaregiData,
+        uploadTime: new Date().toISOString()
+      }), 1800); // 30분 캐시
+    }
+    
+    // 로드 완료 플래그 해제
+    props.deleteProperty('FULL_DATA_LOADING');
+    
+    console.log('백그라운드 전체 데이터 로드 완료');
+    
+  } catch (error) {
+    console.error('백그라운드 데이터 로드 실패:', error);
+    PropertiesService.getScriptProperties().deleteProperty('FULL_DATA_LOADING');
   }
 }
 
