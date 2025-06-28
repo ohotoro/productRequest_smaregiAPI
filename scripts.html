@@ -618,15 +618,72 @@ document.addEventListener('DOMContentLoaded', async function() {
     setupKeyboardShortcuts();
     startAutoSave();
     
-    // 🔴 세션 복원 (발주서 복원)
+    // 🔴 세션 복원 (발주서 복원) 및 마지막 작업 발주서 자동 열기
+    console.log('=== 세션 복원 시작 ===');
+    console.log('현재 AppState.currentOrderInfo:', AppState.currentOrderInfo);
+
     if (AppState.currentOrderInfo) {
+      console.log('이미 발주서가 열려있음');
       const sessionRestored = restoreSession();
       if (!sessionRestored) {
-        // 세션 복원 실패시 발주 목록 업데이트
         updateOrderList();
         updateOrderSummary();
       }
+    } else {
+      console.log('열린 발주서가 없음, 마지막 작업 발주서 확인...');
+      
+      try {
+        const lastOrder = await new Promise((resolve) => {
+          google.script.run
+            .withSuccessHandler((data) => {
+              console.log('getLastWorkingOrder 응답:', data);
+              resolve(data);
+            })
+            .withFailureHandler((error) => {
+              console.error('getLastWorkingOrder 에러:', error);
+              resolve(null);
+            })
+            .getLastWorkingOrder();
+        });
+        
+        if (lastOrder && lastOrder.orderId) {
+          console.log('마지막 작업 발주서 발견:', lastOrder.orderName);
+          updateLoadingMessage('마지막 작업 발주서를 여는 중...');
+          
+          const result = await new Promise((resolve) => {
+            google.script.run
+              .withSuccessHandler((data) => {
+                console.log('openOrder 결과:', data);
+                resolve(data);
+              })
+              .withFailureHandler((error) => {
+                console.error('openOrder 에러:', error);
+                resolve(null);
+              })
+              .openOrder(lastOrder.orderId);
+          });
+          
+          if (result?.success) {
+            console.log('발주서 열기 성공!');
+            AppState.currentOrderInfo = result.orderInfo;
+            AppState.orderItems = result.items || [];
+            updateOrderStatus();
+            enableOrderFeatures();
+            updateOrderList();
+            showQuickSuccess(`마지막 작업 발주서를 열었습니다`);
+            
+            // 발주 항목도 로드
+            await loadOrderItemsFromSheetAsync();
+          }
+        } else {
+          console.log('마지막 작업 발주서 없음');
+        }
+      } catch (error) {
+        console.error('자동 열기 전체 에러:', error);
+      }
     }
+
+    console.log('=== 세션 복원 종료 ===');
     
     hideLoading();
     
@@ -2215,6 +2272,14 @@ function createOrderWithUndelivered(recipientName, undeliveredItems) {
         AppState.currentOrderInfo = result.orderInfo;
         AppState.orderItems = [];
         clearSession();
+
+        const lastOrder = {
+          orderId: result.orderInfo.orderId,
+          orderName: result.orderInfo.fileName,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('lastWorkingOrder', JSON.stringify(lastOrder));
+        console.log('미출고 포함 발주서 localStorage에 저장:', lastOrder);
         
         updateOrderStatus();
         enableOrderFeatures();
@@ -2279,6 +2344,8 @@ function createOrderWithUndelivered(recipientName, undeliveredItems) {
     .createNewOrder(recipientName);
 }
 
+// scripts.html의 createOrderNormal 함수 수정
+
 function createOrderNormal(recipientName) {
   showLoading('새 발주서를 생성하는 중...');
   
@@ -2290,6 +2357,15 @@ function createOrderNormal(recipientName) {
         AppState.currentOrderInfo = result.orderInfo;
         AppState.orderItems = [];
         clearSession();
+        
+        // ✅ localStorage에 마지막 발주서 정보 저장 (추가!)
+        const lastOrder = {
+          orderId: result.orderInfo.orderId,
+          orderName: result.orderInfo.fileName,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('lastWorkingOrder', JSON.stringify(lastOrder));
+        console.log('새 발주서 localStorage에 저장:', lastOrder);
         
         updateOrderStatus();
         enableOrderFeatures();
@@ -4824,11 +4900,6 @@ function saveSession() {
   
   try {
     localStorage.setItem('orderSession', JSON.stringify(session));
-    console.log('세션 저장 성공:', {
-      orderId: session.orderId,
-      itemCount: session.orderItems.length,
-      tab: session.activeTab
-    });
   } catch (error) {
     console.error('세션 저장 실패:', error);
   }
