@@ -95,6 +95,12 @@ function getCache(key) {
       }
     }
     
+    // 일반 캐시에 없으면 청크 캐시 확인
+    const chunkedData = getCacheInChunks(key);
+    if (chunkedData) {
+      return chunkedData;
+    }
+    
     return null;
   } catch (error) {
     console.error('캐시 읽기 실패:', error);
@@ -150,6 +156,7 @@ function setCacheInChunks(key, data, duration = CACHE_DURATION.MEDIUM) {
       cache.put(`${key}_${index}`, JSON.stringify(dataToSave), duration);
     });
     
+    console.log(`청크 캐시 저장 완료: ${chunks.length}개 청크`);
     return true;
   } catch (error) {
     console.error('청크 캐시 저장 실패:', error);
@@ -165,7 +172,7 @@ function getCacheInChunks(key) {
     // 메타데이터 확인
     const metaJson = cache.get(`${key}_meta`);
     if (!metaJson) {
-      console.log(`청크 메타데이터 없음: ${key}_meta`);
+      // 레거시 방식 시도
       return getCacheInChunksLegacy(key);
     }
     
@@ -204,29 +211,34 @@ function getCacheInChunks(key) {
 
 // 레거시 청크 데이터 로드 (하위 호환성)
 function getCacheInChunksLegacy(key) {
-  const cache = CacheService.getScriptCache();
-  const chunkCount = parseInt(cache.get(`${key}_chunks`) || '0');
-  
-  if (chunkCount === 0) {
-    return null;
-  }
-  
-  const isArray = cache.get(`${key}_isArray`) === 'true';
-  const result = isArray ? [] : {};
-  
-  for (let i = 0; i < chunkCount; i++) {
-    const chunkJson = cache.get(`${key}_${i}`);
-    if (chunkJson) {
-      const chunkData = JSON.parse(chunkJson);
-      if (isArray) {
-        result.push(...chunkData);
-      } else {
-        Object.assign(result, chunkData);
+  try {
+    const cache = CacheService.getScriptCache();
+    const chunkCount = parseInt(cache.get(`${key}_chunks`) || '0');
+    
+    if (chunkCount === 0) {
+      return null;
+    }
+    
+    const isArray = cache.get(`${key}_isArray`) === 'true';
+    const result = isArray ? [] : {};
+    
+    for (let i = 0; i < chunkCount; i++) {
+      const chunkJson = cache.get(`${key}_${i}`);
+      if (chunkJson) {
+        const chunkData = JSON.parse(chunkJson);
+        if (isArray) {
+          result.push(...chunkData);
+        } else {
+          Object.assign(result, chunkData);
+        }
       }
     }
+    
+    return result;
+  } catch (error) {
+    console.error('레거시 청크 로드 실패:', error);
+    return null;
   }
-  
-  return result;
 }
 
 // 캐시 무효화 (최적화)
