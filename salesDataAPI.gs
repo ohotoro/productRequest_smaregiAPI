@@ -812,4 +812,4 @@ function clearSalesCache() {
   cache.remove('ALL_SALES_DATA_V2_30');
   cache.remove('all_sales_data_30');
   console.log('판매 캐시 삭제됨');
-}ㅋ
+}
