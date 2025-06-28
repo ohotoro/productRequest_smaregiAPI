@@ -492,8 +492,6 @@ function forceRefreshSalesData() {
       // 갱신 완료 플래그 추가
       result.refreshed = true;
       result.refreshTime = new Date().toISOString();
-      
-      // 🔵 강제 갱신이므로 캐시 정보 재설정
       result.fromCache = false;
       result.cacheAge = 0;
     }
