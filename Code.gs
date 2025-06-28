@@ -4838,21 +4838,31 @@ function getProductsSalesData(barcodes) {
   }
 }
 
-function loadSalesDataForBarcodes(barcodes) {
+function loadSalesDataForBarcodes(barcodes, period = 30) {
   try {
     const salesData = {};
     
-    // Smaregi API가 연결되어 있는지 확인
-    const smaregiToken = PropertiesService.getScriptProperties().getProperty('SMAREGI_ACCESS_TOKEN');
-    if (!smaregiToken) {
-      console.log('Smaregi 토큰 없음');
+    // API 연결 확인
+    if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
+      barcodes.forEach(barcode => {
+        salesData[barcode] = {
+          quantity: 0,
+          amount: 0,
+          avgDaily: 0,
+          trend: 'stable',
+          transactions: []
+        };
+      });
       return salesData;
     }
     
-    // 30일 기준으로 판매 데이터 조회
+    // 기간 설정
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 30);
+    startDate.setDate(startDate.getDate() - period);
+    
+    console.log(`판매 데이터 조회: ${barcodes.length}개 상품, ${period}일`);
     
     // 바코드별로 기본 구조 생성
     barcodes.forEach(barcode => {
@@ -4865,13 +4875,38 @@ function loadSalesDataForBarcodes(barcodes) {
       };
     });
     
-    // 실제 Smaregi API 호출 (배치 처리)
+    // Platform API 사용 가능 확인
+    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
+      const config = getCurrentConfig();
+      if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        // getSimpleSalesDataV2 활용
+        const result = getSimpleSalesDataV2(period);
+        
+        if (result.success && result.data) {
+          barcodes.forEach(barcode => {
+            if (result.data[barcode]) {
+              salesData[barcode] = {
+                quantity: result.data[barcode].quantity || 0,
+                amount: result.data[barcode].amount || 0,
+                avgDaily: parseFloat(((result.data[barcode].quantity || 0) / period).toFixed(1)),
+                trend: result.data[barcode].trend || 'stable',
+                transactions: result.data[barcode].transactions || []
+              };
+            }
+          });
+        }
+        
+        return salesData;
+      }
+    }
+    
+    // Legacy API fallback
     const batchSize = 10;
     for (let i = 0; i < barcodes.length; i += batchSize) {
       const batch = barcodes.slice(i, i + batchSize);
       
       try {
-        // getSalesDataFromSmaregi는 기존 함수 활용
+        // 기존 함수 활용 (있다면)
         const batchData = getSalesDataForProducts(batch, startDate, endDate);
         Object.assign(salesData, batchData);
       } catch (e) {
@@ -4889,7 +4924,7 @@ function loadSalesDataForBarcodes(barcodes) {
 
 function getSmaregiDataProgressive() {
   try {
-    const cache = CacheService.getUserCache();
+    const cache = CacheService.getScriptCache(); // 변경
     
     // 기본 응답 구조
     const response = {
@@ -5195,3 +5230,4 @@ function loadAllProductsSalesData() {
     };
   }
 }
+
