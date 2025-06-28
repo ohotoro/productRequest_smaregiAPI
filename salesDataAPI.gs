@@ -86,7 +86,7 @@ function getBatchSalesData(barcodes, days = 30) {
         });
         
         // 캐시 저장 (30분)
-        setCache(cacheKey, results, 1800);
+        setCache(cacheKey, results, 86400); // 24시간 (1800 → 86400)
         
         const salesCount = results.filter(r => r.quantity > 0).length;
         console.log(`${results.length}개 중 ${salesCount}개 상품에 판매 데이터 있음`);
@@ -121,11 +121,9 @@ function getBatchSalesData(barcodes, days = 30) {
   }
 }
 
-/**
- * 개별 상품의 판매 데이터 조회 (수정 버전)
- * @param {string} barcode - 상품 바코드
- * @returns {Object} 판매 데이터
- */
+// salesDataAPI.gs의 getProductSalesData 함수 수정
+// 함수 시작 부분에 캐시 확인 추가
+
 function getProductSalesData(barcode) {
   try {
     if (!barcode) {
@@ -133,6 +131,14 @@ function getProductSalesData(barcode) {
         success: false,
         message: '바코드가 없습니다'
       };
+    }
+    
+    // 🔵 캐시 확인 추가
+    const cacheKey = `sales_individual_${barcode}`;
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log(`개별 판매 데이터 캐시 사용: ${barcode}`);
+      return cached;
     }
     
     // API 연결 확인
@@ -170,7 +176,7 @@ function getProductSalesData(barcode) {
       }
     }
     
-    // 올바른 값 반환 (longSales의 값을 사용)
+    // 결과 생성
     const result = {
       success: true,
       salesInfo: {
@@ -186,7 +192,9 @@ function getProductSalesData(barcode) {
       }
     };
     
-    console.log(`${barcode} 판매 데이터:`, result.salesInfo);
+    // 🔵 캐시 저장 (24시간)
+    setCache(cacheKey, result, 86400);
+    console.log(`개별 판매 데이터 캐시 저장: ${barcode}`);
     
     return result;
     
@@ -566,16 +574,19 @@ function loadAllProductsSalesData() {
     const longPeriod = parseInt(settings.salesPeriodLong) || 30;
     
     // 캐시 확인
-    const cacheKey = `all_sales_data_${longPeriod}`;
+    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
     const cached = getCache(cacheKey);
-    if (cached) {
-      console.log('캐시된 판매 데이터 반환');
+    if (cacheAge < 1440) {
+      console.log(`캐시된 판매 데이터 반환 (${Math.round(cacheAge)}분 경과)`);
+      
       return {
         success: true,
         data: cached.data,
         period: longPeriod,
-        timestamp: cached.timestamp || new Date().toISOString(),
-        fromCache: true
+        timestamp: cached.timestamp,
+        count: Object.keys(cached.data || {}).length,
+        fromCache: true,
+        cacheAge: Math.round(cacheAge)  // 🔵 추가!
       };
     }
     
@@ -631,14 +642,16 @@ function loadAllProductsSalesData() {
       data: formattedData,
       timestamp: new Date().toISOString()
     };
-    setCache(cacheKey, resultData, 1800);
+    setCache(cacheKey, resultData, 86400); // 24시간
     
     return {
       success: true,
       data: formattedData,
       period: longPeriod,
       timestamp: resultData.timestamp,
-      count: Object.keys(formattedData).length
+      count: Object.keys(formattedData).length,
+      fromCache: false,  // 🔵 추가!
+      cacheAge: 0       // 🔵 추가!
     };
     
   } catch (error) {
@@ -793,3 +806,10 @@ function clearAllSalesCache() {
     return { success: false, error: error.toString() };
   }
 }
+
+function clearSalesCache() {
+  const cache = CacheService.getScriptCache();
+  cache.remove('ALL_SALES_DATA_V2_30');
+  cache.remove('all_sales_data_30');
+  console.log('판매 캐시 삭제됨');
+}ㅋ
