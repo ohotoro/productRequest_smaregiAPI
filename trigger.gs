@@ -23,10 +23,10 @@ function updateFrequentProductsCache() {
     // 자주 발주 바코드 목록 갱신
     const frequentBarcodes = getFrequentProductBarcodes();
     
-    // PropertiesService에 저장
-    const userProperties = PropertiesService.getUserProperties();
-    userProperties.setProperty('frequentBarcodes', JSON.stringify(frequentBarcodes));
-    userProperties.setProperty('frequentBarcodesUpdated', new Date().toISOString());
+    // ScriptProperties에 저장 (모든 사용자 공유)
+    const scriptProperties = PropertiesService.getScriptProperties(); // 변경
+    scriptProperties.setProperty('frequentBarcodes', JSON.stringify(frequentBarcodes));
+    scriptProperties.setProperty('frequentBarcodesUpdated', new Date().toISOString());
     
     console.log(`${frequentBarcodes.length}개 자주 발주 상품 캐시 완료`);
     
