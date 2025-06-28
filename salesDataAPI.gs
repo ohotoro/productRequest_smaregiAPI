@@ -574,19 +574,16 @@ function loadAllProductsSalesData() {
     const longPeriod = parseInt(settings.salesPeriodLong) || 30;
     
     // 캐시 확인
-    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
+    const cacheKey = `all_sales_data_${longPeriod}`;
     const cached = getCache(cacheKey);
-    if (cacheAge < 1440) {
-      console.log(`캐시된 판매 데이터 반환 (${Math.round(cacheAge)}분 경과)`);
-      
+    if (cached) {
+      console.log('캐시된 판매 데이터 반환');
       return {
         success: true,
         data: cached.data,
         period: longPeriod,
-        timestamp: cached.timestamp,
-        count: Object.keys(cached.data || {}).length,
-        fromCache: true,
-        cacheAge: Math.round(cacheAge)  // 🔵 추가!
+        timestamp: cached.timestamp || new Date().toISOString(),
+        fromCache: true
       };
     }
     
@@ -649,9 +646,7 @@ function loadAllProductsSalesData() {
       data: formattedData,
       period: longPeriod,
       timestamp: resultData.timestamp,
-      count: Object.keys(formattedData).length,
-      fromCache: false,  // 🔵 추가!
-      cacheAge: 0       // 🔵 추가!
+      count: Object.keys(formattedData).length
     };
     
   } catch (error) {
@@ -805,11 +800,4 @@ function clearAllSalesCache() {
     console.error('캐시 삭제 실패:', error);
     return { success: false, error: error.toString() };
   }
-}
-
-function clearSalesCache() {
-  const cache = CacheService.getScriptCache();
-  cache.remove('ALL_SALES_DATA_V2_30');
-  cache.remove('all_sales_data_30');
-  console.log('판매 캐시 삭제됨');
 }
