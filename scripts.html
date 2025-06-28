@@ -534,6 +534,71 @@ class SmartRetry {
   }
 }
 
+// ===== 갱신 상태 관리 =====
+const RefreshState = {
+  refreshing: new Set(),
+  lastUpdate: new Date(),
+  
+  add(barcode) {
+    this.refreshing.add(barcode);
+    this.updateUI();
+  },
+  
+  remove(barcode) {
+    this.refreshing.delete(barcode);
+    this.updateUI();
+  },
+  
+  clear() {
+    this.refreshing.clear();
+    this.updateUI();
+  },
+  
+  updateUI() {
+    // 상단 상태바 업데이트
+    const statusBar = document.querySelector('.data-status-bar');
+    if (!statusBar) return;
+    
+    if (this.refreshing.size > 0) {
+      statusBar.classList.add('refreshing');
+      statusBar.innerHTML = `<span>↻</span> 데이터 갱신 중... (${this.refreshing.size})`;
+    } else {
+      statusBar.classList.remove('refreshing');
+      const age = Math.round((new Date() - this.lastUpdate) / 1000 / 60);
+      
+      if (age < 1) {
+        statusBar.innerHTML = `✓ 방금 갱신됨`;
+      } else if (age < 60) {
+        statusBar.innerHTML = `✓ ${age}분 전 갱신`;
+      } else {
+        const hours = Math.floor(age / 60);
+        statusBar.innerHTML = `✓ ${hours}시간 전 갱신`;
+      }
+    }
+    
+    // 개별 배지 업데이트
+    this.refreshing.forEach(barcode => {
+      const badges = document.querySelectorAll(`.badge-sales[data-barcode="${barcode}"]`);
+      badges.forEach(badge => {
+        badge.classList.add('refreshing');
+      });
+    });
+    
+    // 갱신 완료된 배지 정리
+    document.querySelectorAll('.badge-sales.refreshing').forEach(badge => {
+      const barcode = badge.dataset.barcode;
+      if (!this.refreshing.has(barcode)) {
+        badge.classList.remove('refreshing');
+      }
+    });
+  },
+  
+  setLastUpdate(time = new Date()) {
+    this.lastUpdate = time;
+    this.updateUI();
+  }
+};
+
 // ===== 6. 전역 인스턴스 =====
 const cache = new CacheManager();
 const smartRetry = new SmartRetry();
@@ -3242,125 +3307,148 @@ if (typeof showProductIssueModal === 'undefined') {
 }
 
 // ===== 판매 데이터 로드 함수 추가 =====
-function loadSearchResultsSalesData(results) {
-  console.log('판매 데이터 로드 시작');
+async function loadSearchResultsSalesData(results) {
+  console.log('스마트 판매 데이터 로드 시작');
   
   // Smaregi 연결 확인
   if (!AppState.smaregiConnected) {
-    console.log('Smaregi 미연결 - 판매 데이터 조회 불가');
+    console.log('Smaregi 미연결');
     updateAllSalesBadges('no-connection');
     return;
   }
   
-  // 설정에서 판매 기간 가져오기
+  const barcodes = results.map(p => p.barcode).filter(b => b);
+  if (barcodes.length === 0) return;
+  
   const settings = AppState.settings || {};
   const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
   const longPeriod = parseInt(settings.salesPeriodLong) || 30;
   
-  // 바코드 목록 추출
-  const barcodes = results.map(p => p.barcode).filter(b => b);
-  
-  if (barcodes.length === 0) {
-    console.log('바코드가 없음');
-    return;
-  }
-  
   console.log(`${barcodes.length}개 상품 판매 데이터 조회`);
   
-  // 1. 먼저 메모리 캐시에서 확인
-  const cachedBarcodes = [];
-  const uncachedBarcodes = [];
-  let cacheHitCount = 0;
-  
-  barcodes.forEach(barcode => {
-    if (AppState.salesData && AppState.salesData[barcode]) {
-      // 캐시된 데이터 즉시 업데이트
-      const salesInfo = AppState.salesData[barcode];
-      updateSalesBadge(barcode, {
-        barcode: barcode,
-        quantity: salesInfo.quantity || 0,
-        avgDaily: salesInfo.avgDaily || 0,
-        amount: salesInfo.amount || 0,
-        trend: salesInfo.trend || 'stable'
-      }, shortPeriod, longPeriod);
+  // 즉시 캐시 데이터 요청
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (!result || !result.success) {
+        console.error('판매 데이터 조회 실패');
+        return;
+      }
       
-      cachedBarcodes.push(barcode);
-      cacheHitCount++;
-    } else {
-      uncachedBarcodes.push(barcode);
-    }
-  });
-  
-  console.log(`캐시 적중: ${cacheHitCount}/${barcodes.length}개`);
-  
-  // 2. 캐시에 없는 것만 서버에서 조회
-  if (uncachedBarcodes.length > 0) {
-    console.log(`서버 조회 필요: ${uncachedBarcodes.length}개`);
-    
-    google.script.run
-      .withSuccessHandler(function(salesDataArray) {
-        console.log('서버 판매 데이터 조회 성공:', salesDataArray);
+      let cachedCount = 0;
+      let needRefreshCount = 0;
+      
+      // 캐시 데이터 즉시 표시
+      Object.entries(result.data).forEach(([barcode, data]) => {
+        updateSalesBadge(barcode, data, shortPeriod, longPeriod);
         
-        if (!Array.isArray(salesDataArray)) {
-          console.error('잘못된 응답 형식');
-          uncachedBarcodes.forEach(barcode => {
-            updateSalesBadge(barcode, {
-              barcode: barcode,
-              quantity: 0,
-              avgDaily: 0,
-              trend: 'stable'
-            }, shortPeriod, longPeriod);
-          });
-          return;
-        }
+        // 메모리 캐시 업데이트
+        if (!AppState.salesData) AppState.salesData = {};
+        AppState.salesData[barcode] = data;
         
-        // 서버 데이터로 배지 업데이트 및 캐시 저장
-        salesDataArray.forEach(salesData => {
-          if (salesData && salesData.barcode) {
-            updateSalesBadge(salesData.barcode, salesData, shortPeriod, longPeriod);
-            
-            // AppState에 캐시 저장
-            if (!AppState.salesData) {
-              AppState.salesData = {};
+        // 캐시 상태 확인
+        if (result.fromCache && result.fromCache[barcode]) {
+          cachedCount++;
+          
+          // 캐시 표시 (툴팁에)
+          const badge = document.querySelector(`.badge-sales[data-barcode="${barcode}"]`);
+          if (badge) {
+            const originalTitle = badge.title || '';
+            if (!originalTitle.includes('캐시')) {
+              badge.title = originalTitle + ' (캐시)';
             }
-            AppState.salesData[salesData.barcode] = {
-              quantity: salesData.quantity || 0,
-              avgDaily: salesData.avgDaily || 0,
-              amount: salesData.amount || 0,
-              trend: salesData.trend || 'stable',
-              lastUpdate: new Date().toISOString()
-            };
           }
+        }
+      });
+      
+      console.log(`캐시 적중: ${cachedCount}/${barcodes.length}`);
+      
+      // 백그라운드 갱신 필요한 항목
+      if (result.refreshing && result.refreshing.length > 0) {
+        needRefreshCount = result.refreshing.length;
+        console.log(`백그라운드 갱신 필요: ${needRefreshCount}개`);
+        
+        result.refreshing.forEach(barcode => {
+          RefreshState.add(barcode);
         });
         
-        // 툴팁 핸들러 재초기화
+        // 1초 후 백그라운드 갱신 시작
+        setTimeout(() => {
+          refreshInBackground(result.refreshing, longPeriod);
+        }, 1000);
+      }
+      
+      // 상태 업데이트
+      RefreshState.setLastUpdate();
+      
+      // 툴팁 초기화
+      setTimeout(() => {
+        initializeSalesTooltips();
+        initializeSalesInfoHandlers();
+      }, 100);
+    })
+    .withFailureHandler((error) => {
+      console.error('판매 데이터 조회 실패:', error);
+      updateAllSalesBadges('error');
+    })
+    .getBatchSalesData(barcodes, longPeriod);
+}
+
+
+// 백그라운드 갱신
+function refreshInBackground(barcodes, period = 30) {
+  console.log(`백그라운드 갱신 시작: ${barcodes.length}개`);
+  
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (result && result.success && result.data) {
+        console.log(`백그라운드 갱신 완료: ${result.count}개`);
+        
+        // 조용히 UI 업데이트
+        Object.entries(result.data).forEach(([barcode, data]) => {
+          // 배지 업데이트
+          const badges = document.querySelectorAll(`.badge-sales[data-barcode="${barcode}"]`);
+          badges.forEach(badge => {
+            const settings = AppState.settings || {};
+            const shortPeriod = parseInt(settings.salesPeriodShort) || 7;
+            const longPeriod = parseInt(settings.salesPeriodLong) || 30;
+            
+            // 새 배지 생성
+            const newBadgeHtml = createSalesBadge(barcode, data, shortPeriod, longPeriod);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = newBadgeHtml;
+            const newBadge = tempDiv.firstChild;
+            
+            // 기존 배지 교체
+            badge.replaceWith(newBadge);
+          });
+          
+          // 갱신 상태 제거
+          RefreshState.remove(barcode);
+          
+          // 메모리 캐시 업데이트
+          if (!AppState.salesData) AppState.salesData = {};
+          AppState.salesData[barcode] = data;
+        });
+        
+        // 툴팁 재초기화
         setTimeout(() => {
           initializeSalesTooltips();
           initializeSalesInfoHandlers();
         }, 100);
-      })
-      .withFailureHandler(function(error) {
-        console.error('판매 데이터 조회 실패:', error);
-        uncachedBarcodes.forEach(barcode => {
-          updateSalesBadge(barcode, {
-            barcode: barcode,
-            quantity: 0,
-            avgDaily: 0,
-            trend: 'stable'
-          }, shortPeriod, longPeriod);
-        });
-      })
-      .getBatchSalesData(uncachedBarcodes, longPeriod);
-  } else {
-    console.log('모든 데이터가 캐시에 있음 - 서버 조회 불필요');
-    
-    // 툴팁 핸들러 재초기화
-    setTimeout(() => {
-      initializeSalesTooltips();
-      initializeSalesInfoHandlers();
-    }, 100);
-  }
+      } else {
+        console.log('백그라운드 갱신 결과 없음');
+      }
+      
+      // 갱신 상태 정리
+      barcodes.forEach(barcode => RefreshState.remove(barcode));
+    })
+    .withFailureHandler((error) => {
+      console.error('백그라운드 갱신 실패:', error);
+      barcodes.forEach(barcode => RefreshState.remove(barcode));
+    })
+    .triggerBackgroundRefresh(barcodes, period);
 }
+
 
 /**
  * 판매 배지 업데이트 함수 (수정 버전)
