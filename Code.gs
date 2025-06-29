@@ -5230,4 +5230,3 @@ function loadAllProductsSalesData() {
     };
   }
 }
-
