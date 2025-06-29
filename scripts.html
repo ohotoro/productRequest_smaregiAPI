@@ -3640,34 +3640,46 @@ function createSalesBadge(barcode, salesData) {
 
 // 판매 툴팁 모달 관련 전역 변수
 let currentSalesTooltipModal = null;
+let salesTooltipTimeout = null;
 
 // 판매 툴팁 초기화 함수
 function initializeSalesTooltips() {
- // 새로운 이벤트 리스너 추가
-  document.querySelectorAll('.badge-sales').forEach(badge => {
-    badge.addEventListener('mouseenter', showSalesTooltipModal);
-    badge.addEventListener('mouseleave', hideSalesTooltipModal);
-  });
+  
+  // 이벤트 위임 방식으로 변경
+  document.addEventListener('mouseenter', handleSalesMouseOver, true);
+  document.addEventListener('mouseleave', handleSalesMouseOut, true);
 }
 
 function handleSalesMouseOver(e) {
+  if (!e.target || typeof e.target.closest !== 'function') return;
+  
   const badge = e.target.closest('.badge-sales');
   if (!badge || badge.classList.contains('sales-loading')) return;
   
-  // 기존 툴팁 제거
-  hideSalesTooltipModal();
-  
-  const salesData = badge.dataset;
-  if (salesData.totalQty && salesData.avgDaily) {
-    showSalesTooltipModal(badge, salesData);
+  // 타이머 초기화
+  if (salesTooltipTimeout) {
+    clearTimeout(salesTooltipTimeout);
   }
+  
+  // 300ms 지연 후 툴팁 표시
+  salesTooltipTimeout = setTimeout(() => {
+    showSalesTooltipModal({ currentTarget: badge });
+  }, 300);
 }
 
 function handleSalesMouseOut(e) {
+  if (!e.target || typeof e.target.closest !== 'function') return;
+  
   const badge = e.target.closest('.badge-sales');
   if (!badge) return;
   
-  // 마우스가 툴팁으로 이동한 경우는 제외
+  // 타이머 취소
+  if (salesTooltipTimeout) {
+    clearTimeout(salesTooltipTimeout);
+    salesTooltipTimeout = null;
+  }
+  
+  // 툴팁으로 마우스가 이동한 경우는 제외
   const relatedTarget = e.relatedTarget;
   if (relatedTarget && relatedTarget.closest('.sales-tooltip-modal')) return;
   
