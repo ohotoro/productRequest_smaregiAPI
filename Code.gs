@@ -4924,9 +4924,8 @@ function loadSalesDataForBarcodes(barcodes, period = 30) {
 
 function getSmaregiDataProgressive() {
   try {
-    const cache = CacheService.getScriptCache(); // 변경
+    const cache = CacheService.getScriptCache();
     
-    // 기본 응답 구조
     const response = {
       success: true,
       data: {},
@@ -4934,7 +4933,7 @@ function getSmaregiDataProgressive() {
       isPartial: true
     };
     
-    // 전체 Smaregi 데이터 캐시 확인
+    // 전체 캐시 확인
     const fullDataCached = cache.get('SMAREGI_FULL_DATA');
     if (fullDataCached) {
       const parsed = JSON.parse(fullDataCached);
@@ -4944,8 +4943,8 @@ function getSmaregiDataProgressive() {
       return response;
     }
     
-    // 자주 사용하는 상품의 재고만 먼저 반환
-    const frequentBarcodes = getCachedFrequentBarcodes().slice(0, 50);
+    // ⭐ 개선: 50개 → 100개로 확대
+    const frequentBarcodes = getCachedFrequentBarcodes().slice(0, 100);
     const smaregiData = {};
     
     frequentBarcodes.forEach(barcode => {
@@ -5138,6 +5137,8 @@ function getInitialLoadData() {
  */
 function loadAllProductsSalesData() {
   try {
+    console.log('=== 전체 판매 데이터 로드 (병렬) ===');
+    
     // API 연결 확인
     if (!isSmaregiAvailable()) {
       return {
@@ -5148,22 +5149,17 @@ function loadAllProductsSalesData() {
       };
     }
     
-    // 설정에서 기간 가져오기
     const settings = getSettings();
     const longPeriod = Math.min(parseInt(settings.salesPeriodLong) || 30, 31);
     
-    console.log(`전체 판매 데이터 로드 (${longPeriod}일)`);
-    
-    // 캐시 확인
-    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
+    // 전체 캐시 확인
+    const cacheKey = `ALL_SALES_DATA_V3_${longPeriod}`;
     const cached = getCache(cacheKey);
     
     if (cached && cached.timestamp) {
-      const cacheAge = (new Date() - new Date(cached.timestamp)) / 1000 / 60; // 분
-      if (cacheAge < 1440) { // 24시간 이내
-        console.log(`캐시된 전체 판매 데이터 반환 (${Math.round(cacheAge)}분 경과)`);
-        
-        // 캐시 나이 정보 추가
+      const cacheAge = (new Date() - new Date(cached.timestamp)) / 1000 / 60;
+      if (cacheAge < 360) { // 6시간
+        console.log(`캐시 사용 (${Math.round(cacheAge)}분 경과)`);
         return {
           ...cached,
           fromCache: true,
@@ -5172,53 +5168,70 @@ function loadAllProductsSalesData() {
       }
     }
     
-    // 판매 데이터 조회
-    const salesResult = getSimpleSalesDataV2(longPeriod);
+    // V3 함수로 데이터 조회
+    const salesResult = getSimpleSalesDataV3(longPeriod);
     
-    if (!salesResult || !salesResult.success) {
-      console.error('판매 데이터 조회 실패');
+    if (!salesResult.success) {
       return {
         success: false,
+        message: salesResult.message || '판매 데이터 조회 실패',
         data: {},
-        message: '판매 데이터 조회 실패'
+        timestamp: new Date().toISOString()
       };
     }
     
-    // 바코드를 키로 하는 맵으로 변환
-    // (getSimpleSalesDataV2는 productCode를 키로 반환하는데, 우리 시스템에서는 바코드가 productCode와 동일)
-    const salesByBarcode = {};
+    // 바코드 매핑
+    const formattedData = {};
+    const barcodeMapping = getBarcodeToProductCodeMapping();
     
-    Object.entries(salesResult.data || {}).forEach(([productCode, salesData]) => {
-      // productCode를 바코드로 사용
-      salesByBarcode[productCode] = {
-        barcode: productCode,
-        quantity: salesData.quantity || 0,
-        avgDaily: parseFloat(((salesData.quantity || 0) / longPeriod).toFixed(1)),
-        amount: salesData.amount || 0,
-        transactions: salesData.transactions || 0,
-        productName: salesData.productName || '',
-        trend: 'stable' // 추세는 별도 계산 필요시 추가
+    Object.entries(salesResult.data).forEach(([productCode, data]) => {
+      let barcode = productCode;
+      
+      // 매핑 확인
+      for (const [bc, pc] of Object.entries(barcodeMapping)) {
+        if (pc === productCode) {
+          barcode = bc;
+          break;
+        }
+      }
+      
+      // 10자리 숫자는 바코드로 간주
+      if (/^\d{10}$/.test(productCode)) {
+        barcode = productCode;
+      }
+      
+      formattedData[barcode] = {
+        ...data,
+        barcode: barcode,
+        avgDaily: parseFloat((data.quantity / longPeriod).toFixed(1))
       };
+      
+      // 개별 캐시도 저장 (스마트 캐싱)
+      const cacheDuration = getSmartCacheDuration(barcode, data);
+      const individualCache = {
+        data: formattedData[barcode],
+        timestamp: new Date().toISOString()
+      };
+      setCache(`sales_${barcode}_${longPeriod}`, individualCache, cacheDuration);
     });
     
-    console.log(`${Object.keys(salesByBarcode).length}개 상품의 판매 데이터 수집`);
+    console.log(`${Object.keys(formattedData).length}개 상품 판매 데이터 로드 완료`);
     
-    // 결과 캐싱
-    const cacheData = {
-      data: salesByBarcode,
-      timestamp: new Date().toISOString()
+    // 전체 캐시 저장
+    const resultData = {
+      data: formattedData,
+      timestamp: new Date().toISOString(),
+      count: Object.keys(formattedData).length
     };
     
-    setCache(cacheKey, cacheData, 7200); // 2시간 캐시
+    setCache(cacheKey, resultData, 21600); // 6시간
     
     return {
       success: true,
-      data: formattedData,
+      ...resultData,
       period: longPeriod,
-      timestamp: resultData.timestamp,
-      count: Object.keys(formattedData).length,
-      fromCache: false,  // 새로 로드된 데이터
-      cacheAge: 0       // 방금 로드됨
+      fromCache: false,
+      cacheAge: 0
     };
     
   } catch (error) {
@@ -5230,3 +5243,4 @@ function loadAllProductsSalesData() {
     };
   }
 }
+
