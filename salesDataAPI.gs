@@ -869,3 +869,4 @@ function clearAllSalesCache() {
     return { success: false, error: error.toString() };
   }
 }
+
