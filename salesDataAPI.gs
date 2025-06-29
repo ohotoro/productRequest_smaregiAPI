@@ -6,118 +6,186 @@
  * @param {number} days - 조회 기간 (일)
  * @returns {Array} 판매 데이터 배열
  */
-function getBatchSalesData(barcodes, days = 30) {
+function getBatchSalesData(barcodes, period = 30) {
   try {
-    console.log(`=== ${barcodes.length}개 상품의 ${days}일 판매 데이터 조회 ===`);
+    console.log(`=== 배치 판매 데이터 조회: ${barcodes.length}개, ${period}일 ===`);
     
-    // Platform API 확인
-    if (CONFIG && CONFIG.PLATFORM_CONFIG) {
-      const config = getCurrentConfig();
-      if (config.CLIENT_ID && config.CLIENT_SECRET) {
-        console.log('Platform API로 판매 데이터 조회');
-        
-        // 캐시 키 생성
-        const cacheKey = `sales_batch_direct_${days}_${Utilities.computeDigest(
-          Utilities.DigestAlgorithm.MD5, 
-          barcodes.join(',')
-        )}`;
-        
-        // 캐시 확인
-        const cached = getCache(cacheKey);
-        if (cached) {
-          console.log('캐시된 판매 데이터 반환');
-          return cached;
-        }
-        
-        // 판매 데이터 조회
-        const salesResult = getSimpleSalesDataV2(days);
-        
-        if (!salesResult.success) {
-          console.log('판매 데이터 조회 실패');
-          return barcodes.map(barcode => ({
-            barcode: barcode,
-            quantity: 0,
-            avgDaily: 0,
-            trend: 'stable',
-            amount: 0,
-            transactions: 0
-          }));
-        }
-        
-        // 결과 매핑
-        const results = barcodes.map(barcode => {
-          let salesData = null;
+    const result = {
+      success: true,
+      data: {},
+      fromCache: {},
+      refreshing: []
+    };
+    
+    // 1. 캐시 확인 (공유 캐시 사용)
+    const cache = CacheService.getScriptCache(); // 변경
+    const uncachedBarcodes = [];
+    
+    barcodes.forEach(barcode => {
+      const cacheKey = `sales_${barcode}_${period}`;
+      const cached = cache.get(cacheKey);
+      
+      if (cached) {
+        try {
+          const parsedCache = JSON.parse(cached);
+          const productType = getProductCacheType(barcode);
           
-          // 바코드로 직접 찾기
-          if (salesResult.data && salesResult.data[barcode]) {
-            salesData = salesResult.data[barcode];
-            console.log(`${barcode}: 바코드로 판매 데이터 발견 - ${salesData.quantity}개`);
+          // 캐시 사용
+          result.data[barcode] = parsedCache.data || parsedCache;
+          result.fromCache[barcode] = true;
+          
+          // 백그라운드 갱신 필요 확인
+          if (parsedCache.timestamp && needsRefresh(parsedCache.timestamp, productType)) {
+            result.refreshing.push(barcode);
+            console.log(`${barcode}: 백그라운드 갱신 필요 (${productType})`);
           }
-          
-          // 데이터가 있는 경우
-          if (salesData) {
-            // 추세 계산
-            let trend = 'stable';
-            if (salesData.transactions && Array.isArray(salesData.transactions)) {
-              trend = analyzeSalesTrend(salesData.transactions, days);
-            } else if (salesData.trend) {
-              trend = salesData.trend;
-            }
-            
-            return {
-              barcode: barcode,
-              quantity: salesData.quantity || 0,
-              avgDaily: parseFloat(((salesData.quantity || 0) / days).toFixed(1)),
-              trend: trend,
-              amount: salesData.amount || 0,
-              transactions: salesData.transactions || 0
-            };
-          }
-          
-          // 데이터가 없는 경우 기본값 반환
-          return {
-            barcode: barcode,
-            quantity: 0,
-            avgDaily: 0,
-            trend: 'stable',
-            amount: 0,
-            transactions: 0
-          };
-        });
-        
-        // 캐시 저장 (30분)
-        setCache(cacheKey, results, 86400); // 24시간 (1800 → 86400)
-        
-        const salesCount = results.filter(r => r.quantity > 0).length;
-        console.log(`${results.length}개 중 ${salesCount}개 상품에 판매 데이터 있음`);
-        
-        return results;
+        } catch (e) {
+          console.error(`캐시 파싱 오류 (${barcode}):`, e);
+          uncachedBarcodes.push(barcode);
+        }
+      } else {
+        uncachedBarcodes.push(barcode);
       }
+    });
+    
+    console.log(`캐시 적중: ${barcodes.length - uncachedBarcodes.length}/${barcodes.length}`);
+    
+    // 2. 캐시 없는 것만 조회
+    if (uncachedBarcodes.length > 0) {
+      console.log(`API 조회 필요: ${uncachedBarcodes.length}개`);
+      
+      // API 조회
+      const salesData = loadSalesDataForBarcodes(uncachedBarcodes, period);
+      
+      uncachedBarcodes.forEach(barcode => {
+        const data = salesData[barcode] || {
+          quantity: 0,
+          avgDaily: 0,
+          amount: 0,
+          trend: 'stable',
+          transactions: []
+        };
+        
+        result.data[barcode] = data;
+        result.fromCache[barcode] = false;
+        
+        // 스마트 캐시 저장
+        const cacheData = {
+          data: data,
+          timestamp: new Date().toISOString()
+        };
+        const productType = getProductCacheType(barcode);
+        setSmartCache(`sales_${barcode}_${period}`, JSON.stringify(cacheData), productType);
+      });
     }
     
-    // Legacy API 또는 API 연결 안 됨
-    console.log('API 미연결 - 빈 판매 데이터 반환');
-    return barcodes.map(barcode => ({
-      barcode: barcode,
-      quantity: 0,
-      avgDaily: 0,
-      trend: 'stable',
-      amount: 0,
-      transactions: 0
-    }));
+    console.log(`판매 데이터 반환: ${Object.keys(result.data).length}개`);
+    return result;
     
   } catch (error) {
-    console.error('판매 데이터 일괄 조회 실패:', error);
+    console.error('배치 판매 데이터 조회 실패:', error);
+    return { 
+      success: false, 
+      error: error.toString(),
+      data: {}
+    };
+  }
+}
+
+// ===== 백그라운드 갱신 함수 =====
+
+/**
+ * 백그라운드 갱신 실행
+ */
+function executeBackgroundRefresh() {
+  try {
+    const userProperties = PropertiesService.getUserProperties();
+    const pendingData = userProperties.getProperty('PENDING_REFRESH');
     
-    // 에러 시에도 빈 데이터 반환
-    return barcodes.map(barcode => ({
-      barcode: barcode,
-      quantity: 0,
-      avgDaily: 0,
-      trend: 'stable',
-      amount: 0,
-      transactions: 0
+    if (!pendingData) {
+      return { success: false, message: '갱신할 데이터 없음' };
+    }
+    
+    const { barcodes, period = 30 } = JSON.parse(pendingData);
+    userProperties.deleteProperty('PENDING_REFRESH');
+    
+    console.log(`백그라운드 갱신 시작: ${barcodes.length}개`);
+    
+    // 실제 데이터 조회
+    const salesData = loadSalesDataForBarcodes(barcodes, period);
+    
+    // 캐시 업데이트 (공유 캐시 사용)
+    const cache = CacheService.getScriptCache(); // 변경
+    const refreshedData = {};
+    
+    barcodes.forEach(barcode => {
+      const data = salesData[barcode] || {
+        quantity: 0,
+        avgDaily: 0,
+        amount: 0,
+        trend: 'stable'
+      };
+      
+      refreshedData[barcode] = data;
+      
+      // 스마트 캐시 저장
+      const cacheData = {
+        data: data,
+        timestamp: new Date().toISOString()
+      };
+      const productType = getProductCacheType(barcode);
+      setSmartCache(`sales_${barcode}_${period}`, JSON.stringify(cacheData), productType);
+    });
+    
+    console.log(`백그라운드 갱신 완료: ${Object.keys(refreshedData).length}개`);
+    
+    return {
+      success: true,
+      data: refreshedData,
+      count: Object.keys(refreshedData).length
+    };
+    
+  } catch (error) {
+    console.error('백그라운드 갱신 실패:', error);
+    return {
+      success: false,
+      error: error.toString()
+    };
+  }
+}
+
+// 백그라운드 갱신 트리거
+function triggerBackgroundRefresh(barcodes, period = 30) {
+  try {
+    // 현재 시간 확인
+    const currentHour = new Date().getHours();
+    
+    // 20시 이후는 갱신하지 않음
+    if (currentHour >= 20 || currentHour < 6) {
+      console.log('야간 시간대 - 백그라운드 갱신 스킵');
+      return { success: false, message: '야간 시간대' };
+    }
+    
+    // 갱신 요청 저장
+    const userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('PENDING_REFRESH', JSON.stringify({
+      barcodes: barcodes,
+      period: period,
+      timestamp: new Date().toISOString()
     }));
+    
+    // 비동기 실행을 위해 지연 실행
+    Utilities.sleep(100);
+    
+    // 실제 갱신 실행
+    return executeBackgroundRefresh();
+    
+  } catch (error) {
+    console.error('백그라운드 갱신 트리거 실패:', error);
+    return {
+      success: false,
+      error: error.toString()
+    };
   }
 }
 
