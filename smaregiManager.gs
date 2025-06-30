@@ -346,15 +346,32 @@ function syncSmaregiData() {
     
     console.log(`자동 동기화 완료: ${stockData.count}개 항목`);
     
-    // 재고 부족 알림 확인
-    const lowStock = detectLowStockItems();
-    if (lowStock.success && lowStock.count > 10) {
-      // 필요시 이메일 알림 등 추가 가능
-      console.log(`주의: ${lowStock.count}개 상품 재고 부족`);
-    }
+    // 판매 데이터도 1시간 이상이면 갱신
+    checkAndRefreshSalesData();
     
   } catch (error) {
     console.error('자동 동기화 오류:', error);
+  }
+}
+
+// 판매 데이터 신선도 체크 및 갱신
+function checkAndRefreshSalesData() {
+  const cache = CacheService.getScriptCache();
+  const salesMeta = cache.get('all_sales_data_v2_30_meta');
+  
+  if (salesMeta) {
+    try {
+      const meta = JSON.parse(salesMeta);
+      const age = (new Date() - new Date(meta.timestamp)) / 1000 / 60;
+      
+      if (age > 60) { // 1시간 이상
+        console.log(`판매 데이터 ${Math.round(age)}분 경과 - 백그라운드 갱신`);
+        
+        // 백그라운드로 갱신
+        Utilities.sleep(5000); // 5초 대기
+        loadAllProductsSalesData();
+      }
+    } catch (e) {}
   }
 }
 
