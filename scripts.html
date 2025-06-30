@@ -885,25 +885,26 @@ document.addEventListener('DOMContentLoaded', async function() {
     showQuickSuccess(`초기화 완료 (${loadTime.toFixed(1)}초)`);
     
     // 3단계: 백그라운드 작업
+setTimeout(() => {
+  // 판매 데이터는 백그라운드로
+  if (!AppState.salesDataLoaded) {
+    loadSalesDataInBackground();
+  }
+  
+  // 자주 검색 상품 프리페치
+  prefetchFrequentProducts();
+  
+  // 카테고리 규칙
+  loadCategoryRulesAsync().catch(() => {});
+  
+  // 5초 후 전체 데이터 로드 트리거
+  if (typeof triggerFullDataLoad === 'function') {
     setTimeout(() => {
-      // 판매 데이터는 백그라운드로
-      if (!AppState.salesDataLoaded) {
-        loadSalesDataInBackground();
-      }
-      
-      // 자주 검색 상품 프리페치
-      prefetchFrequentProducts();
-      
-      // 카테고리 규칙
-      loadCategoryRulesAsync().catch(() => {});
-      
-      // 5초 후 전체 데이터 로드 트리거
-      if (typeof triggerFullDataLoad === 'function') {
-        setTimeout(() => {
-          google.script.run.triggerFullDataLoad();
-        }, 5000);
-      }
-    }, 2000);
+      google.script.run.triggerFullDataLoad();
+    }, 5000);
+  }
+}, 2000);
+  
     
   } catch (error) {
     console.error('초기화 오류:', error);
@@ -911,10 +912,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     showError('앱 초기화 실패. 새로고침해주세요.');
   }
   
-  setTimeout(() => {
-    loadSalesDataInBackground();
-  }, 2000); // 2초 후 시작
-
   await checkAndSyncSmaregiData();
 });
 
@@ -973,11 +970,14 @@ async function loadSalesDataInBackground() {
     if (result && result.success && result.data) {
       AppState.salesData = result.data;
       AppState.salesDataPartial = true;
-      AppState.salesDataLoaded = true;  // 🔴 추가: 부분 로드도 loaded로 설정
+      AppState.salesDataLoaded = true;
       console.log('자주 검색 상품 판매 데이터 로드 완료');
       
       // 현재 검색 결과 업데이트
-      updateSearchResultsSales();  // 🔴 추가: 판매 배지 업데이트
+      updateSearchResultsSales();
+      
+      // ★★★ 발주목록 판매 배지 업데이트 추가 ★★★
+      updateOrderListSalesBadges();
     }
     
     // 전체 데이터는 나중에
@@ -989,7 +989,6 @@ async function loadSalesDataInBackground() {
     console.error('백그라운드 판매 데이터 로드 실패:', error);
   }
 }
-
 function updateSearchResultsSales() {
   const searchItems = document.querySelectorAll('.search-item');
   
@@ -1051,6 +1050,9 @@ function loadRemainingProductsData() {
         
         // 설정 탭 상태 업데이트
         updateSalesDataStatus();
+        
+        // ★★★ 발주목록 판매 배지 업데이트 추가 ★★★
+        updateOrderListSalesBadges();
       }
     })
     .withFailureHandler((error) => {
@@ -1691,17 +1693,30 @@ function refreshSalesDataInBackground() {
     .forceRefreshSalesData();
 }
 
+// 기존 refreshSalesData 함수를 이 코드로 완전 교체하세요
+
 function refreshSalesData() {
+  // 1시간 제한으로 변경 (훨씬 실용적)
   if (AppState.salesDataLoaded) {
     const lastUpdate = new Date(AppState.salesDataTimestamp);
     const now = new Date();
-    const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
+    const minutesSinceUpdate = (now - lastUpdate) / (1000 * 60);
     
-    // 24시간 이내면 새로고침 스킵 (2 → 24로 변경)
-    if (hoursSinceUpdate < 24) {
-      const hoursLeft = Math.ceil(24 - hoursSinceUpdate);
-      showQuickSuccess(`판매 데이터가 최신입니다. (${hoursLeft}시간 후 갱신 가능)`);
-      return;
+    // 1시간(60분) 이내면 확인
+    if (minutesSinceUpdate < 60) {
+      const minutesLeft = Math.ceil(60 - minutesSinceUpdate);
+      
+      // 10분 이상 지났으면 강제 새로고침 옵션 제공
+      if (minutesSinceUpdate > 10) {
+        if (confirm(`${minutesLeft}분 후 자동 갱신됩니다.\n지금 강제로 새로고침하시겠습니까?`)) {
+          // 강제 새로고침 진행
+        } else {
+          return; // 취소하면 종료
+        }
+      } else {
+        showQuickSuccess(`방금 업데이트되었습니다. (${Math.floor(minutesSinceUpdate)}분 전)`);
+        return;
+      }
     }
   }
   
@@ -1732,18 +1747,38 @@ function refreshSalesData() {
         AppState.salesDataLoaded = true;
         AppState.salesDataTimestamp = result.timestamp || new Date().toISOString();
         
-        showQuickSuccess('판매 데이터가 업데이트되었습니다.');
+        // 성공 메시지 개선
+        const count = Object.keys(salesDataObj).length;
+        showQuickSuccess(`✅ ${count}개 상품의 판매 데이터가 업데이트되었습니다.`);
         
-        // 현재 표시된 검색 결과 업데이트
+        // ★★★ 추가된 부분: 모든 판매 배지 업데이트 ★★★
+        // 1. 검색 결과의 판매 배지 업데이트
+        const searchBadges = document.querySelectorAll('.search-item .badge-sales');
+        searchBadges.forEach(badge => {
+          const barcode = badge.dataset.barcode;
+          if (barcode && salesDataObj[barcode]) {
+            const newBadgeHtml = createSalesBadge(barcode, salesDataObj[barcode]);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = newBadgeHtml;
+            badge.replaceWith(tempDiv.firstChild);
+          }
+        });
+        
+        // 2. 발주목록의 판매 배지 업데이트
+        if (typeof updateOrderListSalesBadges === 'function') {
+          updateOrderListSalesBadges();
+        }
+        
+        // 3. 현재 표시된 검색 결과 재검색 (선택사항)
         const searchResults = document.getElementById('search-results');
         if (searchResults && searchResults.style.display !== 'none') {
           const currentQuery = document.getElementById('search-input').value;
           if (currentQuery && currentQuery.length >= 2) {
-            performSearch();
+            // performSearch(); // 이건 선택사항 (전체 재검색)
           }
         }
         
-        // 설정 탭의 상태 업데이트
+        // 4. 설정 탭의 상태 업데이트
         updateSalesDataStatus();
       } else {
         showError('판매 데이터 새로고침에 실패했습니다.');
@@ -3698,16 +3733,21 @@ function updateSalesBadge(barcode, salesData, shortPeriod, longPeriod) {
  * @param {Object} salesData - 판매 데이터
  * @returns {string} HTML 문자열
  */
-function createSalesBadge(barcode, salesData) {
+function createSalesBadge(barcode, salesData, isSmall = false) {
   const settings = AppState.settings || {};
   const hotThreshold = parseInt(settings.salesThresholdHot) || 20;
   const popularThreshold = parseInt(settings.salesThresholdPopular) || 10;
   const normalThreshold = parseInt(settings.salesThresholdNormal) || 5;
   const longPeriod = parseInt(settings.salesPeriodLong) || 30;
   
+  // 크기 클래스
+  const sizeClass = isSmall ? 'badge-small' : '';
+  
   // API 연결 상태 확인
   if (!AppState.smaregiConnected) {
-    return `<span class="product-badge badge-sales sales-disabled" data-barcode="${barcode}">
+    return `<span class="product-badge badge-sales sales-disabled ${sizeClass}" 
+      data-barcode="${barcode}"
+      onclick="showSalesInfoModal('${barcode}')">
       <span class="sales-icon">❌</span>
       <span class="sales-text">API 미연결</span>
     </span>`;
@@ -3715,7 +3755,8 @@ function createSalesBadge(barcode, salesData) {
   
   // 판매 데이터 로드 상태 확인
   if (!AppState.salesDataLoaded) {
-    return `<span class="product-badge badge-sales sales-loading" data-barcode="${barcode}">
+    return `<span class="product-badge badge-sales sales-loading ${sizeClass}" 
+      data-barcode="${barcode}">
       <span class="sales-icon">⏳</span>
       <span class="sales-text">로딩중...</span>
     </span>`;
@@ -3723,7 +3764,9 @@ function createSalesBadge(barcode, salesData) {
   
   // 판매 데이터 오류 확인
   if (salesData && salesData.error) {
-    return `<span class="product-badge badge-sales sales-error" data-barcode="${barcode}">
+    return `<span class="product-badge badge-sales sales-error ${sizeClass}" 
+      data-barcode="${barcode}"
+      onclick="showSalesInfoModal('${barcode}')">
       <span class="sales-icon">⚠️</span>
       <span class="sales-text">조회 실패</span>
     </span>`;
@@ -3760,7 +3803,7 @@ function createSalesBadge(barcode, salesData) {
     const trendClass = `trend-${trend}`;
     
     // 배지 HTML
-    return `<span class="product-badge badge-sales sales-${level} ${trendClass}" 
+    return `<span class="product-badge badge-sales sales-${level} ${trendClass} ${sizeClass}" 
       data-barcode="${barcode}"
       data-quantity="${totalQty}"
       data-avg-daily="${avgDaily}"
@@ -3769,6 +3812,7 @@ function createSalesBadge(barcode, salesData) {
       data-total="${totalQty}"
       data-avg="${avgDaily}"
       data-loaded="true"
+      onclick="showSalesInfoModal('${barcode}')"
       title="${longPeriod}일간 ${totalQty}개 판매 (일평균 ${avgDaily.toFixed(1)}개)">
       <span class="sales-icon">${icon}</span>
       <span class="sales-text">${text}</span>
@@ -3776,7 +3820,7 @@ function createSalesBadge(barcode, salesData) {
   }
   
   // 데이터가 전혀 없는 경우 (기본값)
-  return `<span class="product-badge badge-sales sales-none" 
+  return `<span class="product-badge badge-sales sales-none ${sizeClass}" 
     data-barcode="${barcode}"
     data-quantity="0"
     data-avg-daily="0"
@@ -3784,7 +3828,8 @@ function createSalesBadge(barcode, salesData) {
     data-period="${longPeriod}"
     data-total="0"
     data-avg="0"
-    data-loaded="true">
+    data-loaded="true"
+    onclick="showSalesInfoModal('${barcode}')">
     <span class="sales-icon">—</span>
     <span class="sales-text">판매 없음</span>
   </span>`;
@@ -4005,31 +4050,47 @@ function showSalesInfoModal(barcode) {
     existingModal.remove();
   }
   
-  const salesInfo = AppState.salesData[barcode];
+  // 배지에서 데이터 가져오기 (우선순위 1)
+  const badge = document.querySelector(`.badge-sales[data-barcode="${barcode}"]`);
+  let salesInfo = null;
+  
+  if (badge && badge.dataset.loaded === 'true') {
+    // 배지 데이터 사용
+    salesInfo = {
+      quantity: parseInt(badge.dataset.quantity) || 0,
+      avgDaily: parseFloat(badge.dataset.avg) || 0,
+      trend: badge.dataset.trend || 'stable',
+      period: parseInt(badge.dataset.period) || 30
+    };
+  } else if (AppState.salesData && AppState.salesData[barcode]) {
+    // AppState 데이터 사용 (우선순위 2)
+    salesInfo = AppState.salesData[barcode];
+  }
+  
   if (!salesInfo) {
     showError('판매 정보가 없습니다.');
     return;
   }
   
-  // 추세 텍스트 매핑 (배지와 일치시키기)
+  // 추세 텍스트 매핑 (배지와 일치)
   const trendMap = {
-    'increasing': '인기',
-    'decreasing': '하락',
+    'up': '상승',
+    'down': '하락',
     'stable': '유지',
+    'increasing': '상승',
+    'decreasing': '하락',
     'new': '신규'
   };
   
   const trendText = trendMap[salesInfo.trend] || '유지';
   const trendClass = `trend-${salesInfo.trend || 'stable'}`;
   
-  // 판매 날짜 목록
-  const salesDates = salesInfo.salesDates || [];
-  const last7Days = salesDates.filter(date => {
-    const daysDiff = (new Date() - new Date(date)) / (1000 * 60 * 60 * 24);
-    return daysDiff <= 7;
-  }).length;
+  // 판매 기간
+  const period = salesInfo.period || 30;
   
-  const last30Days = salesDates.length;
+  // 최근 7일 판매량 계산 (추정치)
+  const last7Days = Math.round((salesInfo.quantity || 0) * (7 / period));
+  const last30Days = salesInfo.quantity || 0;
   
   // 모달 HTML
   const modalHtml = `
@@ -4042,11 +4103,11 @@ function showSalesInfoModal(barcode) {
           <div class="sales-summary">
             <div class="sales-stat">
               <span class="stat-label">조회 기간</span>
-              <span class="stat-value">30일</span>
+              <span class="stat-value">${period}일</span>
             </div>
             <div class="sales-stat">
               <span class="stat-label">총 판매량</span>
-              <span class="stat-value">${salesInfo.count || 0}개</span>
+              <span class="stat-value">${salesInfo.quantity || 0}개</span>
             </div>
             <div class="sales-stat">
               <span class="stat-label">일평균 판매</span>
@@ -4062,11 +4123,11 @@ function showSalesInfoModal(barcode) {
             <h4>판매 추이</h4>
             <div class="sales-period">
               <div class="period-item">
-                <span>최근 7일:</span>
+                <span>최근 7일 (추정):</span>
                 <strong>${last7Days}개</strong>
               </div>
               <div class="period-item">
-                <span>최근 30일:</span>
+                <span>최근 ${period}일:</span>
                 <strong>${last30Days}개</strong>
               </div>
             </div>
@@ -4074,6 +4135,9 @@ function showSalesInfoModal(barcode) {
         </div>
         
         <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="refreshSalesData('${barcode}')">
+            <span class="icon">🔄</span> 새로고침
+          </button>
           <button class="btn btn-primary" onclick="closeSalesInfoModal()">확인</button>
         </div>
       </div>
@@ -4660,118 +4724,156 @@ function updateOrderList() {
       `;
     }
     
-    // 같은 바코드의 다른 항목 확인
-    const sameProducts = barcodeGroups[item.barcode];
-    const isDuplicate = sameProducts.length > 1;
-    const duplicateInfo = isDuplicate ? 
-      `<span class="duplicate-badge" title="동일 상품 ${sameProducts.length}개">×${sameProducts.length}</span>` : 
-      '';
-    
-    return `
-      <div class="order-item ${isConfirmed ? 'confirmed' : ''} ${isExported ? 'exported' : ''} ${isDuplicate ? 'has-duplicate' : ''} ${displaySettings.compactMode ? 'compact' : ''}" data-id="${item.id}">
-        <div class="order-checkbox-wrapper">
-          <input type="checkbox" class="order-checkbox" onchange="updateBulkEditButton()">
-        </div>
-        
-        <div class="order-product-info">
-          <div class="order-product-main">
-            <span class="order-product-name">${item.name}</span>
-            ${duplicateInfo}
-            ${storeStockBadge}
-            ${isConfirmed ? '<span class="confirmed-badge">확정</span>' : ''}
-            ${isExported ? `<span class="exported-badge" title="내보내기: ${item.exportedAt || '완료'}">내보내기 완료</span>` : ''}
-            ${(() => {
-              // 출고 완료 상태 체크 (박스번호 기반)
-              if (item.boxNumbers) {
-                const matches = (item.boxNumbers || '').match(/\d+\((\d+)\)/g);
-                if (matches) {
-                  let totalShipped = 0;
-                  matches.forEach(match => {
-                    const qty = parseInt(match.match(/\((\d+)\)/)[1]);
-                    totalShipped += qty;
-                  });
-                  
-                  const exportableQty = item.exportableQuantity || item.quantity;
-                  if (totalShipped >= exportableQty) {
-                    return '<span class="shipped-badge">출고완료</span>';
-                  } else if (totalShipped > 0) {
-                    return `<span class="partial-shipped-badge">부분출고 (${totalShipped}/${exportableQty})</span>`;
-                  }
-                }
-              }
-              return '';
-            })()}
-          </div>
-          ${colorSizeHtml}
-        </div>
-        
-        <div class="order-quantity-wrapper">
-          <input type="number" 
-                 class="quantity-input" 
-                 value="${item.quantity}" 
-                 min="1" 
-                 onchange="updateQuantity('${item.id}', this.value)"
-                 ${isConfirmed ? 'disabled' : ''}>
-          <span class="quantity-unit">개</span>
-          ${isExported && item.exportedQuantity && item.exportedQuantity !== item.quantity ? 
-            `<span class="exported-quantity">(내보냄: ${item.exportedQuantity}개)</span>` : 
-            ''
-          }
-        </div>
-        
-        <div class="order-amount">₩${formatNumber(amount)}</div>
+// updateOrderList 함수에서 해당 부분을 다음과 같이 수정하세요:
 
-        <div class="stock-status-wrapper">
-          <button class="stock-status-btn ${stockStatus.class}" 
-                  onclick="showQuickStockMenu(event, '${item.id}')"
-                  data-csv-status="${item.stockStatus || ''}">
-            <span>${stockStatus.icon}</span>
-            <span>${stockStatus.text}</span>
-            ${item.stockStatus ? '<span class="csv-indicator">📊</span>' : ''}
-          </button>
-          <div class="quick-stock-menu" id="quick-menu-${item.id}">
-            <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '가능')">
-              <span>✅</span> 가능
-            </div>
-            <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '품절')">
-              <span>❌</span> 품절
-            </div>
-            <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '오더중')">
-              <span>⏳</span> 오더중
-            </div>
-            <div class="quick-stock-option custom" onclick="showStockStatusModal('${item.id}')">
-              <span>✏️</span> 직접 입력...
-            </div>
-          </div>
-        </div>
-        
-        <div class="order-actions">
-          <button class="order-action-btn priority ${priorityDisplay.class}" 
-                  onclick="window.showPriorityPicker('${item.id}')"
-                  data-item-id="${item.id}"
-                  ${isConfirmed ? 'disabled' : ''}
-                  title="우선순위: ${priorityDisplay.text}">
-            <span class="priority-badge">${priorityDisplay.icon}</span>
-            <span class="priority-text">${priorityDisplay.text}</span>
-          </button>
-          <button class="order-action-btn comment ${item.comment ? 'has-comment' : ''}" 
-                  onclick="window.showCommentInput('${item.id}')"
-                  title="${item.comment ? '코멘트 수정' : '코멘트 추가'}">
-            💬
-            ${item.comment ? '<span class="comment-indicator"></span>' : ''}
-          </button>
-          ${!isConfirmed ? 
-            `<button class="order-action-btn delete" onclick="window.removeItem('${item.id}')" title="삭제">삭제</button>` :
-            ''
+// 같은 바코드의 다른 항목 확인
+const sameProducts = barcodeGroups[item.barcode];
+const isDuplicate = sameProducts.length > 1;
+const duplicateInfo = isDuplicate ? 
+  `<span class="duplicate-badge" title="동일 상품 ${sameProducts.length}개">×${sameProducts.length}</span>` : 
+  '';
+
+// ★★★ 판매 배지 추가 ★★★
+let salesBadgeHtml = '';
+if (item.barcode) {
+  const salesData = AppState.salesDataLoaded ? AppState.salesData[item.barcode] : null;
+  salesBadgeHtml = createSalesBadge(item.barcode, salesData, true); // true = 작은 크기
+}
+
+return `
+  <div class="order-item ${isConfirmed ? 'confirmed' : ''} ${isExported ? 'exported' : ''} ${isDuplicate ? 'has-duplicate' : ''} ${displaySettings.compactMode ? 'compact' : ''}" data-id="${item.id}">
+    <div class="order-checkbox-wrapper">
+      <input type="checkbox" class="order-checkbox" onchange="updateBulkEditButton()">
+    </div>
+    
+    <div class="order-product-info">
+      <div class="order-product-main">
+        <span class="order-product-name">${item.name}</span>
+        ${duplicateInfo}
+        ${salesBadgeHtml}
+        ${storeStockBadge}
+        ${isConfirmed ? '<span class="confirmed-badge">확정</span>' : ''}
+        ${isExported ? `<span class="exported-badge" title="내보내기: ${item.exportedAt || '완료'}">내보내기 완료</span>` : ''}
+        ${(() => {
+          // 출고 완료 상태 체크 (박스번호 기반)
+          if (item.boxNumbers) {
+            const matches = (item.boxNumbers || '').match(/\d+\((\d+)\)/g);
+            if (matches) {
+              let totalShipped = 0;
+              matches.forEach(match => {
+                const qty = parseInt(match.match(/\((\d+)\)/)[1]);
+                totalShipped += qty;
+              });
+              
+              const exportableQty = item.exportableQuantity || item.quantity;
+              if (totalShipped >= exportableQty) {
+                return '<span class="shipped-badge">출고완료</span>';
+              } else if (totalShipped > 0) {
+                return `<span class="partial-shipped-badge">부분출고 (${totalShipped}/${exportableQty})</span>`;
+              }
+            }
           }
+          return '';
+        })()}
+      </div>
+      ${colorSizeHtml}
+    </div>
+    
+    <div class="order-quantity-wrapper">
+      <input type="number" 
+             class="quantity-input" 
+             value="${item.quantity}" 
+             min="1" 
+             onchange="updateQuantity('${item.id}', this.value)"
+             ${isConfirmed ? 'disabled' : ''}>
+      <span class="quantity-unit">개</span>
+      ${isExported && item.exportedQuantity && item.exportedQuantity !== item.quantity ? 
+        `<span class="exported-quantity">(내보냄: ${item.exportedQuantity}개)</span>` : 
+        ''
+      }
+    </div>
+    
+    <div class="order-amount">₩${formatNumber(amount)}</div>
+
+    <div class="stock-status-wrapper">
+      <button class="stock-status-btn ${stockStatus.class}" 
+              onclick="showQuickStockMenu(event, '${item.id}')"
+              data-csv-status="${item.stockStatus || ''}">
+        <span>${stockStatus.icon}</span>
+        <span>${stockStatus.text}</span>
+        ${item.stockStatus ? '<span class="csv-indicator">📊</span>' : ''}
+      </button>
+      <div class="quick-stock-menu" id="quick-menu-${item.id}">
+        <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '가능')">
+          <span>✅</span> 가능
+        </div>
+        <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '품절')">
+          <span>❌</span> 품절
+        </div>
+        <div class="quick-stock-option" onclick="setQuickStock('${item.id}', '오더중')">
+          <span>⏳</span> 오더중
+        </div>
+        <div class="quick-stock-option custom" onclick="showStockStatusModal('${item.id}')">
+          <span>✏️</span> 직접 입력...
         </div>
       </div>
-    `;
-  }).join('');
+    </div>
+    
+    <div class="order-actions">
+      <button class="order-action-btn priority ${priorityDisplay.class}" 
+              onclick="window.showPriorityPicker('${item.id}')"
+              data-item-id="${item.id}"
+              ${isConfirmed ? 'disabled' : ''}
+              title="우선순위: ${priorityDisplay.text}">
+        <span class="priority-badge">${priorityDisplay.icon}</span>
+        <span class="priority-text">${priorityDisplay.text}</span>
+      </button>
+      <button class="order-action-btn comment ${item.comment ? 'has-comment' : ''}" 
+              onclick="window.showCommentInput('${item.id}')"
+              title="${item.comment ? '코멘트 수정' : '코멘트 추가'}">
+        💬
+        ${item.comment ? '<span class="comment-indicator"></span>' : ''}
+      </button>
+      ${!isConfirmed ? 
+        `<button class="order-action-btn delete" onclick="window.removeItem('${item.id}')" title="삭제">삭제</button>` :
+        ''
+      }
+    </div>
+  </div>
+`;
+}).join('');
+
+updateOrderSummary();
+updateBulkEditButton();
+updateExportButtonStatus();
+}
+
+
+// 1. 발주목록의 판매 배지만 업데이트하는 함수 추가
+function updateOrderListSalesBadges() {
+  if (!AppState.orderItems || AppState.orderItems.length === 0) {
+    return;
+  }
   
-  updateOrderSummary();
-  updateBulkEditButton();
-  updateExportButtonStatus();
+  console.log('발주목록 판매 배지 업데이트');
+  
+  AppState.orderItems.forEach(item => {
+    if (!item.barcode) return;
+    
+    const badge = document.querySelector(`.order-item[data-id="${item.id}"] .badge-sales`);
+    if (!badge) return;
+    
+    const salesData = AppState.salesData[item.barcode];
+    const newBadgeHtml = createSalesBadge(item.barcode, salesData, true);
+    
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = newBadgeHtml;
+    const newBadge = tempDiv.firstChild;
+    
+    if (newBadge) {
+      badge.replaceWith(newBadge);
+    }
+  });
 }
 
 // 3. sortOrderItems 함수 수정
