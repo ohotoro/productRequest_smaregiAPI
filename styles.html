@@ -7017,6 +7017,128 @@ body.sticky-footer-active {
 }
 
 /* ===== 판매 기간 설정 스타일 ===== */
+/* ===== 판매 정보 모달 스타일 ===== */
+
+/* 판매 정보 모달 */
+#sales-info-modal .modal-content {
+  max-width: 500px;
+}
+
+.sales-info-content {
+  padding: 20px;
+}
+
+.sales-summary {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.sales-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* 추세 색상 */
+.stat-value.trend-increasing {
+  color: #dc3545;
+}
+
+.stat-value.trend-decreasing {
+  color: #007bff;
+}
+
+.stat-value.trend-stable {
+  color: #6c757d;
+}
+
+.stat-value.trend-new {
+  color: #28a745;
+}
+
+/* 판매 차트 영역 */
+.sales-chart {
+  margin-top: 20px;
+}
+
+.sales-chart h4 {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #333;
+}
+
+.sales-period {
+  display: flex;
+  gap: 24px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.period-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.period-item span {
+  color: #666;
+  font-size: 14px;
+}
+
+.period-item strong {
+  color: #333;
+  font-size: 16px;
+}
+
+/* 발주목록용 작은 배지 */
+.badge-sales.badge-small {
+  padding: 2px 6px;
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+.badge-sales.badge-small .sales-icon {
+  font-size: 10px;
+}
+
+/* 발주목록 재고 영역 수정 */
+.order-item-stock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 검색 결과 컬러명 표시 */
+.size-text {
+  font-size: 12px;
+  color: #666;
+  padding: 2px 6px;
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+
+/* 모달 z-index 조정 (중복 방지) */
+#sales-info-modal {
+  z-index: 10001;
+}
+
 .sales-period-inputs {
     display: flex;
     gap: 20px;
