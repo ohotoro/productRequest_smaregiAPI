@@ -836,7 +836,7 @@ function getSimpleSalesDataV2(days = 30) {
     
     // 2단계: 병렬로 상세 조회 (fetchAll 사용)
     const salesMap = {};
-    const BATCH_SIZE = 20; // 20개씩 병렬 처리
+    const BATCH_SIZE = 15; // 15개씩 병렬 처리
     const startTime = new Date().getTime();
     
     for (let i = 0; i < allTransactions.length; i += BATCH_SIZE) {
