@@ -6749,45 +6749,302 @@ function showChartLoading(containerId) {
 
 // 대시보드 로드 함수 개선
 function loadDashboard() {
-  // 모든 차트에 로딩 표시
-  ['top-products', 'category-chart', 'monthly-trend', 'supplier-chart', 'weekday-pattern'].forEach(id => {
-    showChartLoading(id);
-  });
+  console.log('미니멀 대시보드 로딩 시작');
   
+  // 로딩 상태 표시
+  showDashboardLoading();
+  
+  // 서버에서 데이터 가져오기
   google.script.run
-    .withSuccessHandler(function(data) {
-      if (!data) {
-        showError('대시보드 데이터를 불러올 수 없습니다.');
-        return;
-      }
-      
-      // 각 데이터 표시
-      displayActionItems(data.actionItems || []);
-      displayMetrics(data);
-      displayTopProducts(data.topProducts || []);
-      displayCategoryChart(data.categoryStats || []);
-      displayMonthlyTrend(data.monthlyTrend || []);
-      displaySupplierChart(data.supplierStats || []);
-      displayWeekdayPattern(data.weekdayPattern || []);
-      displayBudgetStatus(data.budgetStatus || {});
-      
-      if (data.trendingProducts) {
-        displayTrendingProducts(data.trendingProducts);
-      }
+    .withSuccessHandler(renderMinimalDashboard)
+    .withFailureHandler(handleDashboardError)
+    .getDashboardData();
+}
+
+function showDashboardLoading() {
+  const placeholders = document.querySelectorAll('.loading-placeholder');
+  placeholders.forEach(el => {
+    el.innerHTML = '<div class="spinner"></div> 데이터 로딩중...';
+  });
+}
+
+// 대시보드 렌더링
+function renderMinimalDashboard(data) {
+  console.log('대시보드 데이터:', data);
+  
+  if (!data) {
+    handleDashboardError('데이터가 없습니다');
+    return;
+  }
+  
+  // 상단 지표 업데이트
+  updateHeroMetrics(data);
+  
+  // AI 인사이트 업데이트
+  updateAIInsights(data);
+  
+  // 베스트셀러 표시
+  displayBestSellers(data.bestSellers || data.topProducts);
+  
+  // 재고 현황 표시
+  displayStockStatus(data);
+  
+  // 월별 트렌드 차트
+  displayMonthlyTrendChart(data.monthlyTrend);
+  
+  // 애니메이션 효과
+  animateDashboard();
+}
+
+
+// 상단 지표 업데이트
+function updateHeroMetrics(data) {
+  // 이번달 발주액
+  const monthlyTotal = data.monthlyTrend && data.monthlyTrend.length > 0 
+    ? data.monthlyTrend[data.monthlyTrend.length - 1].totalAmount 
+    : 0;
+  
+  document.getElementById('monthly-total').textContent = formatCurrency(monthlyTotal);
+  
+  // 전월 대비 변화율
+  if (data.monthlyTrend && data.monthlyTrend.length > 1) {
+    const prevMonth = data.monthlyTrend[data.monthlyTrend.length - 2].totalAmount;
+    const change = ((monthlyTotal - prevMonth) / prevMonth * 100).toFixed(1);
+    const trendText = document.getElementById('monthly-trend-text');
+    
+    trendText.querySelector('.trend-icon').textContent = change >= 0 ? '↑' : '↓';
+    trendText.querySelector('.trend-value').textContent = Math.abs(change) + '%';
+    trendText.style.color = change >= 0 ? '#10b981' : '#ef4444';
+  }
+  
+  // 재고 부족 상품 수
+  const lowStockCount = data.lowStockItems ? data.lowStockItems.length : 0;
+  document.getElementById('low-stock-count').textContent = lowStockCount;
+  
+  // 오늘 판매 (Smaregi 연동시)
+  if (data.smaregiStatus && data.smaregiStatus.stats) {
+    document.getElementById('today-sales').textContent = 
+      formatNumber(data.smaregiStatus.stats.todaySales || 0);
+  } else {
+    document.getElementById('today-sales').textContent = '-';
+  }
+  
+  // 긴급 발주 필요
+  const urgentCount = data.actionItems ? 
+    data.actionItems.filter(item => item.type === 'urgent').length : 0;
+  document.getElementById('urgent-orders').textContent = urgentCount;
+}
+
+// AI 인사이트 업데이트
+function updateAIInsights(data) {
+  const insightText = document.getElementById('ai-recommendation');
+  
+  if (data.orderSuggestions && data.orderSuggestions.length > 0) {
+    const topSuggestion = data.orderSuggestions[0];
+    insightText.textContent = `${topSuggestion.productName} 외 ${data.orderSuggestions.length}개 상품의 발주를 추천합니다.`;
+  } else if (data.actionItems && data.actionItems.length > 0) {
+    insightText.textContent = data.actionItems[0].message;
+  } else {
+    insightText.textContent = '모든 재고가 안정적입니다.';
+  }
+}
+
+function displayBestSellers(products) {
+  const container = document.getElementById('bestseller-list');
+  
+  if (!products || products.length === 0) {
+    container.innerHTML = '<div class="empty-state">데이터가 없습니다</div>';
+    return;
+  }
+  
+  const html = products.slice(0, 10).map((product, index) => {
+    const rank = index + 1;
+    return `
+      <div class="bestseller-item">
+        <div class="bestseller-rank ${rank <= 3 ? 'top3' : ''}">${rank}</div>
+        <div class="bestseller-info">
+          <div class="bestseller-name">${product.name || product.productName}</div>
+          <div class="bestseller-stats">
+            ${formatNumber(product.totalQuantity || product.quantity || 0)}개 · 
+            ${product.orderCount || 1}회
+          </div>
+        </div>
+        <div class="bestseller-amount">
+          ${formatCurrency(product.totalAmount || 0)}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html;
+}
+
+// 재고 현황 표시
+function displayStockStatus(data) {
+  let critical = 0, warning = 0, normal = 0;
+  
+  if (data.lowStockItems) {
+    data.lowStockItems.forEach(item => {
+      if (item.currentStock === 0) critical++;
+      else if (item.currentStock < (item.safetyStock || 10)) warning++;
+      else normal++;
+    });
+  }
+  
+  // 전체 상품 수에서 계산
+  const totalProducts = (data.totalProducts || 100);
+  normal = totalProducts - critical - warning;
+  
+  document.getElementById('critical-stock').textContent = critical;
+  document.getElementById('warning-stock').textContent = warning;
+  document.getElementById('normal-stock').textContent = normal;
+  
+  // 재고 부족 상품 리스트
+  if (data.lowStockItems && data.lowStockItems.length > 0) {
+    const lowStockHtml = data.lowStockItems.slice(0, 5).map(item => `
+      <div class="low-stock-item">
+        <span class="low-stock-name">${item.productName}</span>
+        <span class="low-stock-qty">재고: ${item.currentStock || 0}</span>
+      </div>
+    `).join('');
+    
+    document.getElementById('low-stock-items').innerHTML = lowStockHtml;
+  } else {
+    document.getElementById('low-stock-items').innerHTML = 
+      '<div class="empty-state">재고 부족 상품이 없습니다</div>';
+  }
+}
+
+// 월별 트렌드 차트
+function displayMonthlyTrendChart(trendData) {
+  const container = document.getElementById('monthly-trend-chart');
+  
+  if (!trendData || trendData.length === 0) {
+    container.innerHTML = '<div class="empty-state">데이터가 없습니다</div>';
+    return;
+  }
+  
+  // 최근 6개월 데이터만
+  const recentData = trendData.slice(-6);
+  const maxAmount = Math.max(...recentData.map(d => d.totalAmount || 0));
+  
+  const html = recentData.map(month => {
+    const height = maxAmount > 0 ? (month.totalAmount / maxAmount * 150) : 0;
+    const amount = formatShortCurrency(month.totalAmount);
+    
+    return `
+      <div class="trend-bar">
+        <div class="trend-bar-fill" style="height: ${height}px">
+          <div class="trend-bar-value">${amount}</div>
+        </div>
+        <div class="trend-bar-label">${month.month.substring(5)}</div>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html;
+}
+
+function handleDashboardError(error) {
+  console.error('대시보드 로드 실패:', error);
+  
+  const errorHtml = `
+    <div class="error-state">
+      <div class="error-icon">⚠️</div>
+      <div class="error-message">데이터를 불러올 수 없습니다</div>
+      <button class="btn btn-primary" onclick="loadDashboard()">다시 시도</button>
+    </div>
+  `;
+  
+  document.querySelectorAll('.loading-placeholder').forEach(el => {
+    el.innerHTML = errorHtml;
+  });
+}
+
+// 대시보드 새로고침
+function refreshDashboard() {
+  console.log('대시보드 새로고침');
+  loadDashboard();
+}
+
+// 재고 부족 모달 표시
+function showLowStockModal() {
+  // 재고 부족 상품 상세 모달 표시
+  alert('재고 분석 기능은 준비중입니다');
+}
+
+// 대시보드 리포트 내보내기
+function exportDashboardReport() {
+  google.script.run
+    .withSuccessHandler(function(url) {
+      window.open(url, '_blank');
     })
     .withFailureHandler(function(error) {
-      showError('대시보드 로드 실패: ' + error);
-      // 모든 차트에 에러 상태 표시
-      document.querySelectorAll('.chart-container').forEach(container => {
-        container.innerHTML = `
-          <div class="empty-chart">
-            <div class="empty-chart-icon">❌</div>
-            <div class="empty-chart-text">로드 실패</div>
-          </div>
-        `;
-      });
+      showError('리포트 생성 실패: ' + error);
     })
-    .getDashboardData();
+    .exportDashboardReport();
+}
+
+// 포맷 헬퍼 함수들
+function formatCurrency(amount) {
+  return '₩' + new Intl.NumberFormat('ko-KR').format(Math.round(amount));
+}
+
+function formatShortCurrency(amount) {
+  if (amount >= 1000000) {
+    return '₩' + (amount / 1000000).toFixed(1) + 'M';
+  } else if (amount >= 1000) {
+    return '₩' + (amount / 1000).toFixed(0) + 'K';
+  }
+  return '₩' + amount;
+}
+
+function formatNumber(num) {
+  return new Intl.NumberFormat('ko-KR').format(num);
+}
+
+// 애니메이션 효과
+function animateDashboard() {
+  // 숫자 카운트업 애니메이션
+  const valueElements = document.querySelectorAll('.metric-value, .stock-count');
+  valueElements.forEach(el => {
+    const finalValue = el.textContent;
+    const numericValue = parseInt(finalValue.replace(/[^0-9]/g, '')) || 0;
+    
+    if (numericValue > 0) {
+      animateValue(el, 0, numericValue, 1000);
+    }
+  });
+  
+  // 차트 애니메이션
+  const bars = document.querySelectorAll('.trend-bar-fill');
+  bars.forEach((bar, index) => {
+    setTimeout(() => {
+      bar.style.transform = 'scaleY(1)';
+    }, index * 100);
+  });
+}
+
+// 숫자 애니메이션
+function animateValue(el, start, end, duration) {
+  const startTime = performance.now();
+  const originalText = el.textContent;
+  const prefix = originalText.match(/^[^0-9]*/)[0];
+  const suffix = originalText.match(/[^0-9]*$/)[0];
+  
+  function update(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const value = Math.floor(progress * (end - start) + start);
+    
+    el.textContent = prefix + formatNumber(value) + suffix;
+    
+    if (progress < 1) {
+      requestAnimationFrame(update);
+    }
+  }
+  
+  requestAnimationFrame(update);
 }
 
 function displayActionItems(items) {
@@ -9929,28 +10186,169 @@ function closeCurrentOrder() {
     return;
   }
   
-  if (!confirm('발주서를 마감하시겠습니까?\n마감 후에는 수정이 불가능합니다.')) {
+  // 미처리 항목 찾기
+  const unprocessedItems = AppState.orderItems.filter(item => {
+    const status = item.stockAvailable || '';
+    return status === '품절' || status === '오더중' || status.includes('개만 가능');
+  });
+  
+  if (unprocessedItems.length === 0) {
+    // 미처리 항목이 없으면 바로 마감
+    if (confirm('발주서를 마감하시겠습니까?\n마감 후에는 수정이 불가능합니다.')) {
+      executeCloseOrder([]);
+    }
+  } else {
+    // 미처리 항목이 있으면 모달 표시
+    showCloseOrderModal(unprocessedItems);
+  }
+}
+
+function toggleAllCloseItems(checkbox) {
+  const checkboxes = document.querySelectorAll('#unprocessed-items-list input[type="checkbox"]');
+  checkboxes.forEach(cb => {
+    cb.checked = checkbox.checked;
+  });
+}
+
+// 2. showCloseOrderModal 함수 완전 교체
+function showCloseOrderModal(items) {
+  // 통계 계산
+  const stats = {
+    soldout: 0,
+    ordering: 0,
+    partial: 0
+  };
+  
+  // HTML 생성 및 통계 계산
+  const listHtml = items.map(item => {
+    const status = item.stockAvailable || '';
+    
+    // 통계 업데이트
+    if (status === '품절') stats.soldout++;
+    else if (status === '오더중') stats.ordering++;
+    else if (status.includes('개만 가능')) stats.partial++;
+    
+    // 나머지 수량 계산
+    let remainingQty = item.quantity;
+    if (status.includes('개만 가능')) {
+      const match = status.match(/(\d+)개만 가능/);
+      if (match) {
+        const availableQty = parseInt(match[1]);
+        remainingQty = Math.max(0, item.quantity - availableQty);
+      }
+    }
+    
+    return `
+      <div class="unprocessed-item">
+        <label class="checkbox-label" style="display: flex; align-items: center; width: 100%;">
+          <input type="checkbox" value="${item.id}" checked style="margin-right: 10px;">
+          <span style="flex: 1;">${item.name} ${item.option || ''}</span>
+          <span class="stock-status ${status === '품절' ? 'status-soldout' : status === '오더중' ? 'status-ordering' : 'status-partial'}" style="margin: 0 10px;">
+            ${status}
+          </span>
+          <span class="qty">수량: ${item.quantity}${remainingQty < item.quantity ? ` (미처리: ${remainingQty})` : ''}</span>
+        </label>
+      </div>
+    `;
+  }).join('');
+  
+  // 통계 업데이트
+  document.getElementById('soldout-count').textContent = stats.soldout;
+  document.getElementById('ordering-count').textContent = stats.ordering;
+  document.getElementById('partial-count').textContent = stats.partial;
+  
+  // 리스트 업데이트
+  document.getElementById('unprocessed-items-list').innerHTML = listHtml;
+  
+  // 라디오 버튼 이벤트 설정
+  document.querySelectorAll('input[name="close-action"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      const targetSection = document.getElementById('target-order-select');
+      if (this.value === 'move') {
+        targetSection.style.display = 'block';
+      } else {
+        targetSection.style.display = 'none';
+      }
+    });
+  });
+  
+  // 기본값이 'move'이므로 처음부터 표시
+  document.getElementById('target-order-select').style.display = 'block';
+  
+  // 다른 발주서 목록 로드
+  google.script.run
+    .withSuccessHandler(function(orders) {
+      const select = document.getElementById('target-order');
+      
+      let optionsHtml = '<option value="">발주서 선택...</option>';
+      optionsHtml += '<option value="new">➕ 새 발주서 생성</option>';
+      
+      if (orders && orders.length > 0) {
+        optionsHtml += '<optgroup label="📋 기존 발주서">';
+        orders.forEach(order => {
+          const displayName = order.recipient ? 
+            `${order.name} - ${order.recipient}` : 
+            order.name;
+          optionsHtml += `<option value="${order.id}">${displayName}</option>`;
+        });
+        optionsHtml += '</optgroup>';
+      }
+      
+      select.innerHTML = optionsHtml;
+    })
+    .withFailureHandler(function(error) {
+      console.error('발주서 목록 로드 실패:', error);
+      const select = document.getElementById('target-order');
+      select.innerHTML = '<option value="">발주서 목록 로드 실패</option>';
+    })
+    .getOtherOrders(AppState.currentOrderInfo.orderId);
+
+  document.getElementById('close-order-modal').style.display = 'block';
+}
+
+function processCloseOrder() {
+  const selectedItems = [];
+  document.querySelectorAll('#unprocessed-items-list input:checked').forEach(cb => {
+    const item = AppState.orderItems.find(i => i.id == cb.value);
+    if (item) selectedItems.push(item);
+  });
+  
+  if (selectedItems.length === 0) {
+    showError('처리할 항목을 선택해주세요.');
     return;
   }
   
+  const action = document.querySelector('input[name="close-action"]:checked').value;
+  const targetOrderId = document.getElementById('target-order').value;
+  
+  if (action === 'move' && !targetOrderId) {
+    showError('이동할 발주서를 선택해주세요.');
+    return;
+  }
+  
+  executeCloseOrder(selectedItems, targetOrderId);
+}
+
+function skipAndClose() {
+  if (confirm('선택하지 않은 항목은 복사되지 않습니다. 계속하시겠습니까?')) {
+    executeCloseOrder([]);
+  }
+}
+
+function executeCloseOrder(itemsToCopy, targetOrderId) {
   showLoading('발주서 마감 처리 중...');
+  closeModal('close-order-modal');
   
   google.script.run
-    .withSuccessHandler(result => {
+    .withSuccessHandler(function(result) {
       hideLoading();
       if (result.success) {
         showQuickSuccess(result.message);
         
-        // 발주서 상태 업데이트
-        if (AppState.currentOrderInfo) {
-          AppState.currentOrderInfo.isClosed = true;
-        }
-        
         // UI 업데이트
-        updateOrderList();
+        AppState.currentOrderInfo.isClosed = true;
         updateOrderStatus();
         
-        // 마감 버튼 비활성화
         const closeBtn = document.getElementById('closeOrderBtn');
         if (closeBtn) {
           closeBtn.disabled = true;
@@ -9960,11 +10358,11 @@ function closeCurrentOrder() {
         showError('마감 처리 실패: ' + result.error);
       }
     })
-    .withFailureHandler(error => {
+    .withFailureHandler(function(error) {
       hideLoading();
-      showError('마감 처리 실패: ' + error.toString());
+      showError('마감 처리 실패: ' + error);
     })
-    .closeOrder(AppState.currentOrderInfo.orderId);
+    .closeOrderWithCopy(AppState.currentOrderInfo.orderId, itemsToCopy, targetOrderId);
 }
 
 function quickOrderBestProducts() {
