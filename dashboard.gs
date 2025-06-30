@@ -1,68 +1,105 @@
 // ===== dashboard.gs - 대시보드 데이터 통합 및 최적화 =====
 
 // ===== 메인 대시보드 데이터 함수 (API 통합) =====
+// dashboard.gs의 getDashboardData() 함수만 교체
+
 function getDashboardData() {
   try {
-    console.log('=== 대시보드 데이터 생성 시작 ===');
+    console.log('=== 미니멀 대시보드 데이터 생성 ===');
     const startTime = new Date().getTime();
     
     // 캐시 확인
     const cached = getCache(CACHE_KEYS.DASHBOARD_DATA);
     if (cached) {
-      console.log('캐시된 대시보드 데이터 반환');
+      console.log('캐시된 데이터 반환');
       return cached;
     }
     
-    // Smaregi API 연결 상태 확인
+    // Smaregi 연동 확인
     const smaregiConnected = isSmaregiAvailable();
-    let smaregiStats = null;
     
-    if (smaregiConnected) {
-      // API 연결 시 실시간 데이터 사용
-      smaregiStats = getSmaregiDashboardStats();
-    }
-    
-    // 병렬 처리를 위한 데이터 수집
+    // 핵심 데이터만 수집
     const dashboardData = {
-      // 긴급 액션 아이템
-      actionItems: getActionItems(),
+      // 월별 트렌드 (필수)
+      monthlyTrend: getMonthlyTrend() || [],
       
-      // 핵심 지표
-      topProducts: getTopProducts(),
-      categoryStats: getCategoryStats(),
-      monthlyTrend: getMonthlyTrend(),
-      supplierStats: getSupplierStats(),
-      weekdayPattern: getWeekdayPattern(),
-      budgetStatus: getBudgetStatus(),
-      trendingProducts: getTrendingProducts(),
-      efficiencyMetrics: getEfficiencyMetrics(),
+      // 베스트셀러 TOP 10 - 오타 수정!
+bestSellers: smaregiConnected ? 
+  getBestSellers(30, 10) :  // ← salesDataAPI.gs의 실제 함수
+  getTopProducts(10),
       
-      // Smaregi 실시간 데이터 추가
+      // 재고 현황
+      lowStockItems: smaregiConnected ? 
+        getSmaregiLowStockItems(20) : 
+        getLowStockItemsLocal(),
+      
+      // 전체 상품 수
+      totalProducts: getTotalProductCount(),
+      
+      // Smaregi 상태
       smaregiStatus: {
         connected: smaregiConnected,
-        stats: smaregiStats,
-        lastSync: smaregiStats ? smaregiStats.lastUpdate : null
+        stats: smaregiConnected ? getSmaregiQuickStats() : null
       },
       
-      // 실시간 재고 부족 상품 (API 사용 시)
-      lowStockItems: smaregiConnected ? getSmaregiLowStockItems(10).slice(0, 20) : [],
+      // AI 추천 (옵션)
+      orderSuggestions: smaregiConnected ? 
+        getAIOrderSuggestions(5) : [],
       
-      // AI 발주 제안 (API 사용 시)
-      orderSuggestions: smaregiConnected ? generateSmaregiOrderSuggestions({ limit: 10 }) : []
+      // 액션 아이템
+      actionItems: getSimpleActionItems(),
+      
+      // 생성 시간
+      generatedAt: new Date().toISOString(),
+      loadTime: new Date().getTime() - startTime
     };
     
-    // 캐시 저장 (15분 - API 데이터 고려)
-    setCache(CACHE_KEYS.DASHBOARD_DATA, dashboardData, CACHE_DURATION.SHORT * 3);
+    // 오류 방지를 위한 기본값 설정
+    dashboardData.monthlyTrend = dashboardData.monthlyTrend || [];
+    dashboardData.bestSellers = dashboardData.bestSellers || [];
+    dashboardData.lowStockItems = dashboardData.lowStockItems || [];
     
-    const endTime = new Date().getTime();
-    console.log(`대시보드 데이터 생성 완료: ${endTime - startTime}ms`);
+    // 캐시 저장 (5분)
+    setCache(CACHE_KEYS.DASHBOARD_DATA, dashboardData, 300);
     
+    console.log(`데이터 생성 완료: ${dashboardData.loadTime}ms`);
     return dashboardData;
     
   } catch (error) {
     console.error('대시보드 데이터 생성 실패:', error);
-    // 오류 시 기본값 반환
-    return getDefaultDashboardData();
+    
+    // 에러 발생시 기본 데이터 반환
+    return {
+      error: error.toString(),
+      monthlyTrend: [],
+      bestSellers: [],
+      lowStockItems: [],
+      totalProducts: 0,
+      smaregiStatus: { connected: false },
+      orderSuggestions: [],
+      actionItems: []
+    };
+  }
+}
+
+// Smaregi 베스트셀러 함수 (실제 함수명에 맞게 수정)
+function getSmaregibestSellers(limit) {
+  try {
+    // salesDataAPI.gs에 정의된 실제 함수 호출
+    // getBestSellingProducts가 실제 함수명인 경우:
+    const bestSellers = getBestSellingProducts(limit);
+    
+    if (!bestSellers || bestSellers.length === 0) {
+      // Smaregi 데이터가 없으면 로컬 데이터 사용
+      return getTopProducts(limit);
+    }
+    
+    return bestSellers;
+    
+  } catch (error) {
+    console.error('Smaregi 베스트셀러 조회 실패:', error);
+    // 오류시 로컬 데이터로 대체
+    return getTopProducts(limit);
   }
 }
 
@@ -685,4 +722,284 @@ function getDefaultCategoryRules() {
     'shoes': 'footwear',
     'sneakers': 'footwear'
   };
+}
+
+// 간단한 액션 아이템
+function getSimpleActionItems() {
+  const items = [];
+  
+  // 재고 부족 확인
+  const lowStock = getLowStockItemsLocal();
+  if (lowStock.length > 0) {
+    items.push({
+      type: 'urgent',
+      title: '재고 부족 경고',
+      message: `${lowStock.length}개 상품의 재고가 부족합니다`,
+      action: 'checkInventory'
+    });
+  }
+  
+  // 예산 확인
+  const budget = getBudgetStatus();
+  if (budget && budget.percentage > 80) {
+    items.push({
+      type: 'warning',
+      title: '예산 초과 주의',
+      message: `이번달 예산의 ${budget.percentage}%를 사용했습니다`,
+      action: 'viewBudget'
+    });
+  }
+  
+  return items;
+}
+
+// 로컬 재고 부족 체크 (Smaregi 미연동시)
+function getLowStockItemsLocal() {
+  try {
+    const sheet = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID)
+      .getSheetByName(CONFIG.SHEETS.PRODUCTS);
+    
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const stockCol = headers.indexOf('재고상태');
+    
+    if (stockCol === -1) return [];
+    
+    const lowStockItems = [];
+    
+    for (let i = 1; i < data.length && lowStockItems.length < 20; i++) {
+      const row = data[i];
+      const stockStatus = row[stockCol];
+      
+      if (stockStatus === '품절' || stockStatus === '오더중') {
+        lowStockItems.push({
+          productName: row[1], // 상품명
+          barcode: row[0],
+          currentStock: 0,
+          stockStatus: stockStatus
+        });
+      }
+    }
+    
+    return lowStockItems;
+    
+  } catch (error) {
+    console.error('로컬 재고 확인 실패:', error);
+    return [];
+  }
+}
+
+// Smaregi 빠른 통계
+function getSmaregiQuickStats() {
+  try {
+    const today = new Date();
+    const salesData = getSmaregiSalesData(today, today);
+    
+    if (salesData.success && salesData.data) {
+      const todaySales = salesData.data.reduce((sum, item) => 
+        sum + (parseFloat(item.salesAmount) || 0), 0);
+      
+      return {
+        todaySales: todaySales,
+        todayTransactions: salesData.data.length,
+        lastUpdate: new Date().toISOString()
+      };
+    }
+    
+    return null;
+    
+  } catch (error) {
+    console.error('Smaregi 통계 조회 실패:', error);
+    return null;
+  }
+}
+
+// AI 발주 추천 (간단 버전)
+function getAIOrderSuggestions(limit = 5) {
+  try {
+    const lowStock = getSmaregiLowStockItems(50);
+    const frequent = getCachedFrequentBarcodes();
+    
+    // 재고 부족 + 자주 발주 상품 우선
+    const suggestions = lowStock
+      .filter(item => frequent.includes(item.barcode))
+      .slice(0, limit)
+      .map(item => ({
+        productName: item.productName,
+        barcode: item.barcode,
+        currentStock: item.currentStock,
+        suggestedQty: Math.max(10, item.avgDailySales * 30),
+        reason: '재고 부족 + 인기 상품'
+      }));
+    
+    return suggestions;
+    
+  } catch (error) {
+    console.error('AI 추천 생성 실패:', error);
+    return [];
+  }
+}
+
+// 전체 상품 수 가져오기
+function getTotalProductCount() {
+  try {
+    const sheet = SpreadsheetApp.openById(CONFIG.PRODUCT_SHEET_ID)
+      .getSheetByName(CONFIG.SHEETS.PRODUCTS);
+    
+    return sheet ? sheet.getLastRow() - 1 : 0;
+    
+  } catch (error) {
+    console.error('상품 수 조회 실패:', error);
+    return 0;
+  }
+}
+
+// 대시보드 리포트 내보내기
+function exportDashboardReport() {
+  try {
+    const data = getDashboardData();
+    
+    // 새 스프레드시트 생성
+    const reportSheet = SpreadsheetApp.create(
+      `대시보드 리포트_${new Date().toISOString().split('T')[0]}`
+    );
+    
+    const sheet = reportSheet.getActiveSheet();
+    
+    // 헤더
+    sheet.getRange('A1:D1').setValues([['OHOTORO 대시보드 리포트', '', '', '']]);
+    sheet.getRange('A2:D2').setValues([['생성일시:', new Date().toLocaleString('ko-KR'), '', '']]);
+    
+    // 월별 트렌드
+    sheet.getRange('A4').setValue('월별 발주 현황');
+    const trendData = data.monthlyTrend.map(m => [
+      m.month,
+      m.totalAmount,
+      m.orderCount,
+      m.itemCount
+    ]);
+    
+    if (trendData.length > 0) {
+      sheet.getRange('A5:D5').setValues([['월', '발주액', '발주건수', '상품수']]);
+      sheet.getRange(6, 1, trendData.length, 4).setValues(trendData);
+    }
+    
+    // 베스트셀러
+    const bestRow = 6 + trendData.length + 2;
+    sheet.getRange(bestRow, 1).setValue('베스트셀러 TOP 10');
+    
+    const bestData = data.bestSellers.map((p, i) => [
+      i + 1,
+      p.productName || p.name,
+      p.totalQuantity || p.quantity,
+      p.totalAmount || 0
+    ]);
+    
+    if (bestData.length > 0) {
+      sheet.getRange(bestRow + 1, 1, 1, 4).setValues([['순위', '상품명', '수량', '금액']]);
+      sheet.getRange(bestRow + 2, 1, bestData.length, 4).setValues(bestData);
+    }
+    
+    // 포맷팅
+    sheet.autoResizeColumns(1, 4);
+    
+    return reportSheet.getUrl();
+    
+  } catch (error) {
+    console.error('리포트 생성 실패:', error);
+    throw error;
+  }
+}
+
+function getOtherOrders(currentOrderId) {
+  try {
+    // getOrderList() 호출 후 현재 발주서만 제외
+    const allOrders = getOrderList();
+    
+    return allOrders.filter(order => 
+      order.orderId !== currentOrderId && 
+      !order.fileName.includes('[마감]')
+    );
+    
+  } catch (error) {
+    console.error('발주서 목록 조회 실패:', error);
+    return [];
+  }
+}
+
+// 복사 포함 마감 처리
+function closeOrderWithCopy(orderId, itemsToCopy, targetOrderId) {
+  try {
+    // 1. 선택한 항목을 다른 발주서로 복사
+    if (itemsToCopy.length > 0 && targetOrderId) {
+      copyItemsToOrder(itemsToCopy, targetOrderId);
+    }
+    
+    // 2. 기존 마감 처리 실행
+    return closeOrder(orderId);
+    
+  } catch (error) {
+    console.error('마감 처리 실패:', error);
+    return { success: false, error: error.toString() };
+  }
+}
+
+// 항목 복사 함수
+function copyItemsToOrder(items, targetOrderId) {
+  try {
+    const targetSS = SpreadsheetApp.openById(targetOrderId);
+    const targetSheet = targetSS.getSheetByName('발주서');
+    
+    if (!targetSheet) return;
+    
+    const lastRow = targetSheet.getLastRow();
+    const newData = items.map(item => {
+      // 나머지 수량 계산
+      let qty = item.quantity;
+      if (item.stockAvailable && item.stockAvailable.includes('개만 가능')) {
+        const match = item.stockAvailable.match(/(\d+)개만 가능/);
+        if (match) {
+          qty = Math.max(0, item.quantity - parseInt(match[1]));
+        }
+      }
+      
+      return [
+        item.barcode,
+        item.name,
+        item.option || '',
+        qty,
+        item.purchasePrice || 0,
+        '', // 합계는 자동계산
+        item.weight || '',
+        item.priority || 3,
+        `복사됨: ${item.stockAvailable}`,
+        item.isFrequent ? 'Y' : '',
+        '대기',
+        '미확인',
+        item.supplierName || ''
+      ];
+    });
+    
+    if (newData.length > 0) {
+      targetSheet.getRange(lastRow + 1, 1, newData.length, 13).setValues(newData);
+    }
+    
+  } catch (error) {
+    console.error('항목 복사 실패:', error);
+  }
+}
+
+// minimal-dashboard-js의 closeCurrentOrder 앞에 추가
+function closeOrderFromDashboard() {
+  if (!AppState.currentOrderInfo) {
+    showError('열려있는 발주서가 없습니다. 먼저 발주서를 생성하거나 열어주세요.');
+    // 발주서 작성 탭으로 이동
+    switchTab('order');
+    return;
+  }
+  
+  // 발주서가 있으면 기존 마감 함수 호출
+  closeCurrentOrder();
 }
