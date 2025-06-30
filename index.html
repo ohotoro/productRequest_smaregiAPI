@@ -384,233 +384,126 @@
             </div>
         </div>
 
-        <!-- 대시보드 탭 -->
-        <div id="dashboard-tab" class="tab-content">
-            <!-- 긴급 액션 아이템 -->
-            <div id="action-items" class="action-items-container"></div>
-
-            <!-- 🆕 Smaregi 실시간 재고 현황 (새로 추가) -->
-            <div class="dashboard-section">
-                <h3>📊 실시간 재고 현황</h3>
-                <div class="smaregi-dashboard" id="smaregi-dashboard">
-                    <div class="stock-summary">
-                        <div class="summary-card">
-                            <div class="card-icon">📦</div>
-                            <div class="card-content">
-                                <div class="card-value" id="total-products">-</div>
-                                <div class="card-label">전체 상품</div>
-                            </div>
-                        </div>
-                        <div class="summary-card alert">
-                            <div class="card-icon">🚨</div>
-                            <div class="card-content">
-                                <div class="card-value" id="out-of-stock">-</div>
-                                <div class="card-label">재고 소진</div>
-                            </div>
-                        </div>
-                        <div class="summary-card warning">
-                            <div class="card-icon">⚠️</div>
-                            <div class="card-content">
-                                <div class="card-value" id="low-stock">-</div>
-                                <div class="card-label">재고 부족</div>
-                            </div>
-                        </div>
-                        <div class="summary-card success">
-                            <div class="card-icon">✅</div>
-                            <div class="card-content">
-                                <div class="card-value" id="normal-stock">-</div>
-                                <div class="card-label">정상 재고</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="last-sync">
-                        <span>마지막 동기화: <span id="last-sync-time">-</span></span>
-                        <button class="btn btn-sm" onclick="refreshSmaregiConnection()">지금 동기화</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 🆕 AI 발주 제안 섹션 (새로 추가) -->
-            <div class="dashboard-section">
-                <h3>🤖 AI 발주 제안</h3>
-                <div class="ai-suggestions" id="ai-suggestions">
-                    <div class="suggestion-filters">
-                        <button class="filter-btn active" data-filter="urgent">긴급</button>
-                        <button class="filter-btn" data-filter="trending">인기상품</button>
-                        <button class="filter-btn" data-filter="lowstock">재고부족</button>
-                    </div>
-                    <div id="suggestion-list" class="suggestion-list">
-                        <!-- 동적으로 생성될 제안 목록 -->
-                    </div>
-                    <div class="suggestion-actions">
-                        <button class="btn btn-primary" onclick="createOrderFromSuggestions()">
-                            선택한 상품으로 발주서 생성
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Quick Actions -->
-            <div class="quick-actions">
-                <!-- 새 발주서 생성 버튼 추가 -->
-                <button class="quick-action-btn primary" onclick="showCreateOrderModal()">
-                    <span class="action-icon">➕</span>
-                    <span>새 발주서 생성</span>
+<!-- 대시보드 탭 -->
+<div id="dashboard-tab" class="tab-content">
+        <!-- 빠른 액션 -->
+        <div class="dashboard-section">
+            <h3 class="section-title">빠른 실행</h3>
+            <div class="quick-actions-grid">
+                <button class="quick-action" onclick="switchTab('order')">
+                    <span class="action-icon">📝</span>
+                    <span class="action-text">새 발주서</span>
                 </button>
-
-                <!-- 마감 버튼 (이미 있음) -->
-                <button id="closeOrderBtn" onclick="closeCurrentOrder()" class="quick-action-btn">
+                <button id="closeOrderBtn" class="quick-action" onclick="closeCurrentOrder()">
                     <span class="action-icon">🔒</span>
-                    <span>마감</span>
+                    <span class="action-text">마감</span>
                 </button>
-
-                <!-- CSV 내보내기 버튼 추가 -->
-                <button id="export-csv-btn" class="quick-action-btn" onclick="showExportModal()">
-                  <span class="action-icon">📥</span>
-                  <span>CSV 내보내기</span>
-                </button>
-
-                <button class="quick-action-btn primary" onclick="showAutoSuggestions()">
-                    <span class="action-icon">🤖</span>
-                    <span>AI 발주 제안</span>
-                </button>
-
-                <button class="quick-action-btn" onclick="showSalesAnalysis()">
-                    <span class="action-icon">📈</span>
-                    <span>판매 분석</span>
-                </button>
-
-                <!-- 기존 버튼들 -->
-                <button class="quick-action-btn" onclick="quickAction('bestProducts')">
-                    <span class="action-icon">⚡</span>
-                    <span>베스트 상품 빠른 발주</span>
-                </button>
-                <button class="quick-action-btn" onclick="quickAction('monthlyReport')">
+                <button class="quick-action" onclick="showLowStockModal()">
                     <span class="action-icon">📊</span>
-                    <span>월간 리포트</span>
+                    <span class="action-text">재고 분석</span>
                 </button>
-                <button class="quick-action-btn" onclick="quickAction('budgetAlert')">
-                    <span class="action-icon">💰</span>
-                    <span>예산 알림 설정</span>
+                <button class="quick-action" onclick="exportDashboardReport()">
+                    <span class="action-icon">📥</span>
+                    <span class="action-text">리포트</span>
+                </button>
+                <button class="quick-action" onclick="refreshDashboard()">
+                    <span class="action-icon">🔄</span>
+                    <span class="action-text">새로고침</span>
                 </button>
             </div>
-
-            <!-- 핵심 지표 -->
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>오늘 판매액</h4>
-                    <div class="metric-value" id="today-sales">₩0</div>
-                    <div class="metric-change" id="sales-change">-</div>
-                </div>
-
-                <div class="metric-card">
-                    <h4>재고 회전율</h4>
-                    <div class="metric-value" id="turnover-rate">-</div>
-                    <div class="metric-change">목표: 12회/년</div>
-                </div>
-                <div class="metric-card">
-                    <h4>이번 달 발주액</h4>
-                    <div class="metric-value" id="monthly-total">₩0</div>
-                    <div class="metric-change" id="monthly-change">-</div>
-                </div>
-                <div class="metric-card">
-                    <h4>평균 발주 주기</h4>
-                    <div class="metric-value" id="avg-cycle">-</div>
-                    <div class="metric-change">최적: 7일</div>
-                </div>
-                <div class="metric-card">
-                    <h4>반복 발주율</h4>
-                    <div class="metric-value" id="repeat-rate">-</div>
-                    <div class="metric-change">목표: 80%</div>
-                </div>
-                <div class="metric-card">
-                    <h4>예산 사용률</h4>
-                    <div class="metric-value" id="budget-rate">0%</div>
-                    <div class="metric-progress">
-                        <div class="mini-progress-bar">
-                            <div id="budget-mini-fill" class="mini-progress-fill"></div>
-                        </div>
-                    </div>
+        </div>
+    <!-- 상단 핵심 지표 -->
+    <div class="dashboard-hero">
+        <div class="hero-metric primary">
+            <div class="metric-label">이번달 발주액</div>
+            <div class="metric-value" id="monthly-total">₩0</div>
+            <div class="metric-trend" id="monthly-trend-text">
+                <span class="trend-icon">―</span>
+                <span class="trend-value">0%</span>
+            </div>
+        </div>
+        
+        <div class="hero-metrics-grid">
+            <div class="hero-metric">
+                <div class="metric-icon">📦</div>
+                <div class="metric-info">
+                    <div class="metric-label">재고 부족</div>
+                    <div class="metric-value" id="low-stock-count">0</div>
                 </div>
             </div>
-
-            <div class="dashboard-grid">
-                <div class="dashboard-card full-width">
-                    <h3>📊 판매 & 재고 현황</h3>
-                    <div class="chart-tabs">
-                        <button class="chart-tab active" data-chart="sales-stock">판매vs재고</button>
-                        <button class="chart-tab" data-chart="turnover">회전율</button>
-                        <button class="chart-tab" data-chart="forecast">수요예측</button>
-                    </div>
-                    <div id="integrated-chart" class="chart-container"></div>
+            
+            <div class="hero-metric">
+                <div class="metric-icon">🔥</div>
+                <div class="metric-info">
+                    <div class="metric-label">오늘 판매</div>
+                    <div class="metric-value" id="today-sales">0</div>
                 </div>
-                <!-- 발주 베스트 TOP 10 -->
-                <div class="dashboard-card">
-                    <h3>발주 베스트 TOP 10</h3>
-                    <div id="top-products" class="chart-container"></div>
-                </div>
-
-                <!-- 카테고리별 발주 현황 -->
-                <div class="dashboard-card">
-                    <h3>카테고리별 발주 현황</h3>
-                    <div id="category-chart" class="chart-container"></div>
-                </div>
-
-                <!-- 급상승/급하락 상품 -->
-                <div class="dashboard-card">
-                    <h3>급상승/급하락 상품</h3>
-                    <div class="trend-container">
-                        <div class="trend-section">
-                            <h4 class="trend-title up">🔥 급상승</h4>
-                            <div id="trending-up" class="trend-list"></div>
-                        </div>
-                        <div class="trend-divider"></div>
-                        <div class="trend-section">
-                            <h4 class="trend-title down">📉 급하락</h4>
-                            <div id="trending-down" class="trend-list"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 월별 발주 금액 추이 -->
-                <div class="dashboard-card full-width">
-                    <h3>월별 발주 금액 추이</h3>
-                    <div id="monthly-trend" class="chart-container"></div>
-                </div>
-
-                <!-- 공급사별 발주 현황 -->
-                <div class="dashboard-card">
-                    <h3>공급사별 발주 현황 TOP 10</h3>
-                    <div id="supplier-chart" class="chart-container"></div>
-                </div>
-
-                <!-- 발주 빈도 분석 -->
-                <div class="dashboard-card">
-                    <h3>요일별 발주 패턴</h3>
-                    <div id="weekday-pattern" class="chart-container"></div>
-                </div>
-
-                <!-- 예산 사용 현황 -->
-                <div class="dashboard-card">
-                    <h3>월 예산 사용 현황</h3>
-                    <div class="budget-detail">
-                        <div class="budget-progress">
-                            <div class="progress-bar">
-                                <div id="budget-used" class="progress-fill"></div>
-                            </div>
-                            <div class="budget-info">
-                                <span id="budget-text">₩0 / ₩0</span>
-                                <span id="budget-percent">0%</span>
-                            </div>
-                        </div>
-                        <div class="budget-forecast">
-                            <p id="budget-forecast-text">-</p>
-                        </div>
-                    </div>
+            </div>
+            
+            <div class="hero-metric">
+                <div class="metric-icon">⚡</div>
+                <div class="metric-info">
+                    <div class="metric-label">긴급 발주</div>
+                    <div class="metric-value" id="urgent-orders">0</div>
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- AI 인사이트 (간단하게) -->
+    <div class="ai-insights" id="ai-insights">
+        <div class="insight-card">
+            <div class="insight-icon">💡</div>
+            <div class="insight-content">
+                <div class="insight-title">발주 추천</div>
+                <div class="insight-text" id="ai-recommendation">데이터를 분석중입니다...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 메인 대시보드 그리드 -->
+    <div class="minimal-dashboard-grid">
+        <!-- 베스트셀러 -->
+        <div class="dashboard-section">
+            <h3 class="section-title">베스트셀러 TOP 10</h3>
+            <div class="bestseller-list" id="bestseller-list">
+                <div class="loading-placeholder">로딩중...</div>
+            </div>
+        </div>
+
+        <!-- 재고 현황 -->
+        <div class="dashboard-section">
+            <h3 class="section-title">재고 현황</h3>
+            <div class="stock-status-grid" id="stock-status">
+                <div class="stock-card critical">
+                    <div class="stock-label">긴급</div>
+                    <div class="stock-count" id="critical-stock">0</div>
+                </div>
+                <div class="stock-card warning">
+                    <div class="stock-label">주의</div>
+                    <div class="stock-count" id="warning-stock">0</div>
+                </div>
+                <div class="stock-card normal">
+                    <div class="stock-label">정상</div>
+                    <div class="stock-count" id="normal-stock">0</div>
+                </div>
+            </div>
+            
+            <!-- 재고 부족 상품 리스트 -->
+            <div class="low-stock-items" id="low-stock-items">
+                <div class="loading-placeholder">로딩중...</div>
+            </div>
+        </div>
+
+        <!-- 월별 트렌드 (심플한 차트) -->
+        <div class="dashboard-section full-width">
+            <h3 class="section-title">월별 발주 트렌드</h3>
+            <div class="trend-chart" id="monthly-trend-chart">
+                <div class="loading-placeholder">로딩중...</div>
+            </div>
+        </div>
+    </div>
+</div>
 
         <!-- 자주 발주 탭 -->
         <div id="frequent-tab" class="tab-content">
@@ -1008,7 +901,91 @@
 
     <?!= include('scripts'); ?>
 
-
+<!-- 마감 처리 모달 -->
+<div id="close-order-modal" class="modal">
+  <div class="modal-content" style="max-width: 800px;">
+    <span class="modal-close" onclick="closeModal('close-order-modal')">&times;</span>
+    
+    <h3>📋 발주서 마감</h3>
+    
+    <div class="close-order-info">
+      <p>다음 항목들을 확인하고 처리 방법을 선택해주세요:</p>
+    </div>
+    
+    <!-- 미처리 항목 리스트 -->
+    <div class="unprocessed-items-container">
+      <div class="filter-bar">
+        <label class="checkbox-label">
+          <input type="checkbox" id="select-all-close" onchange="toggleAllCloseItems(this)">
+          전체 선택
+        </label>
+        
+        <div class="filter-stats">
+          <span class="stat-item">
+            <span class="stat-icon">❌</span>
+            품절: <span id="soldout-count">0</span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-icon">⏳</span>
+            오더중: <span id="ordering-count">0</span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-icon">📊</span>
+            수량제한: <span id="partial-count">0</span>
+          </span>
+        </div>
+      </div>
+      
+      <div id="unprocessed-items-list" class="unprocessed-items-list">
+        <!-- 동적으로 생성될 항목들 -->
+      </div>
+    </div>
+    
+    <!-- 처리 옵션 -->
+    <div class="close-options">
+      <h4>선택한 항목 처리 방법:</h4>
+      
+      <div class="option-group">
+        <label class="radio-label">
+          <input type="radio" name="close-action" value="move" checked>
+          <span class="option-icon">📦</span>
+          기존발주서로 이동
+        </label>
+        
+        <label class="radio-label">
+          <input type="radio" name="close-action" value="history">
+          <span class="option-icon">📝</span>
+          미출고이력에만 기록
+        </label>
+        
+        <label class="radio-label">
+          <input type="radio" name="close-action" value="delete">
+          <span class="option-icon">🗑️</span>
+          삭제
+        </label>
+      </div>
+      
+      <!-- 기존발주서 선택 (이동 옵션 선택시만 표시) -->
+      <div id="target-order-select" class="target-order-section">
+        <label>대상 발주서:</label>
+        <select id="target-order" class="form-input">
+          <option value="">발주서 선택...</option>
+          <option value="new">새 발주서 생성</option>
+        </select>
+      </div>
+    </div>
+    
+    <!-- 액션 버튼 -->
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="processCloseOrder()">
+        <span>마감 처리</span>
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal('close-order-modal')">
+        취소
+      </button>
+    </div>
+  </div>
+</div>
 
 </body>
 
