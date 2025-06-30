@@ -13,6 +13,7 @@
 </head>
 
 <body>
+  
     <div class="container">
         <!-- 헤더 -->
         <header class="header">
@@ -465,9 +466,9 @@
                 </button>
 
                 <!-- CSV 내보내기 버튼 추가 -->
-                <button class="quick-action-btn" onclick="showExportModal()">
-                    <span class="action-icon">📥</span>
-                    <span>CSV 내보내기</span>
+                <button id="export-csv-btn" class="quick-action-btn" onclick="showExportModal()">
+                  <span class="action-icon">📥</span>
+                  <span>CSV 내보내기</span>
                 </button>
 
                 <button class="quick-action-btn primary" onclick="showAutoSuggestions()">
