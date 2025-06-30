@@ -8138,6 +8138,74 @@ body.sticky-footer-active {
   animation: spin 1s linear infinite;
   opacity: 0.6;
 }
+/* 발주 목록의 미니 판매 배지 */
+.badge-sales.mini {
+  padding: 2px 6px;
+  font-size: 10px;
+  min-width: auto;
+}
 
+.badge-sales.mini .sales-icon {
+  font-size: 11px;
+}
+
+.badge-sales.mini .sales-text {
+  display: none;
+}
+
+/* 발주 목록에서 배지 간격 조정 */
+.order-product-main .product-badge {
+  margin-left: 6px;
+}
+
+/* 발주목록용 작은 판매 배지 스타일 */
+.badge-sales.badge-small {
+  padding: 2px 6px;
+  font-size: 11px;
+  margin-left: 8px;
+  min-width: 50px;
+}
+
+.badge-sales.badge-small .sales-icon {
+  font-size: 10px;
+  margin-right: 2px;
+}
+
+.badge-sales.badge-small .sales-text {
+  font-size: 10px;
+}
+
+/* 컴팩트 모드에서 더 작게 */
+.order-item.compact .badge-sales.badge-small {
+  padding: 1px 4px;
+  font-size: 10px;
+  min-width: 40px;
+}
+
+.order-item.compact .badge-sales.badge-small .sales-icon,
+.order-item.compact .badge-sales.badge-small .sales-text {
+  font-size: 9px;
+}
+
+/* 배지 간격 조정 */
+.order-product-main .badge-sales {
+  margin-left: 6px;
+}
+
+/* 여러 배지가 있을 때 정렬 */
+.order-product-main > span {
+  vertical-align: middle;
+}
+
+/* 판매 정보 모달 새로고침 버튼 */
+#sales-info-modal .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#sales-info-modal .btn-secondary .icon {
+  font-size: 14px;
+}
 
 </style >
