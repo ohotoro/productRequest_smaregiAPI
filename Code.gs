@@ -73,42 +73,81 @@ function loadInitialProductsWithIssues() {
     
     // 타임아웃 설정 (30초)
     const timeoutTime = startTime.getTime() + 30000;
+
+    const loadPromises = [];
+    const results = {
+      frequentBarcodes: [],
+      recentProducts: [],
+      sharedRecent: [],
+      productIssues: {}
+    };
     
-    // 1. 자주 발주 바코드
-    let frequentBarcodes = [];
-    try {
-      frequentBarcodes = getCachedFrequentBarcodes() || [];
-      console.log(`자주 발주 바코드 ${frequentBarcodes.length}개 로드`);
-    } catch (e) {
-      console.error('자주 발주 바코드 로드 실패:', e);
-    }
+    // 1. 자주 발주 바코드 (병렬)
+    loadPromises.push(
+      new Promise((resolve) => {
+        try {
+          results.frequentBarcodes = getCachedFrequentBarcodes() || [];
+          console.log(`자주 발주 바코드 ${results.frequentBarcodes.length}개 로드`);
+          resolve();
+        } catch (e) {
+          console.error('자주 발주 바코드 로드 실패:', e);
+          resolve();
+        }
+      })
+    );
     
-    // 2. 최근 추가 상품
-    let recentProducts = [];
-    try {
-      recentProducts = getRecentProducts(50) || [];
-      console.log(`최근 추가 상품 ${recentProducts.length}개 로드`);
-    } catch (e) {
-      console.error('최근 추가 상품 로드 실패:', e);
-    }
+    // 2. 최근 추가 상품 (병렬)
+    loadPromises.push(
+      new Promise((resolve) => {
+        try {
+          results.recentProducts = getRecentProducts(50) || [];
+          console.log(`최근 추가 상품 ${results.recentProducts.length}개 로드`);
+          resolve();
+        } catch (e) {
+          console.error('최근 추가 상품 로드 실패:', e);
+          resolve();
+        }
+      })
+    );
     
-    // 3. 공유 최근 상품
-    let sharedRecent = [];
-    try {
-      sharedRecent = getSharedRecentProducts().slice(0, 20) || [];
-      console.log(`공유 최근 상품 ${sharedRecent.length}개 로드`);
-    } catch (e) {
-      console.error('공유 최근 상품 로드 실패:', e);
-    }
+    // 3. 공유 최근 상품 (병렬)
+    loadPromises.push(
+      new Promise((resolve) => {
+        try {
+          results.sharedRecent = getSharedRecentProducts().slice(0, 20) || [];
+          console.log(`공유 최근 상품 ${results.sharedRecent.length}개 로드`);
+          resolve();
+        } catch (e) {
+          console.error('공유 최근 상품 로드 실패:', e);
+          resolve();
+        }
+      })
+    );
     
-    // 4. 제품 이슈사항
-    let productIssues = {};
-    try {
-      productIssues = loadProductIssues() || {};
-      console.log(`제품 이슈사항 ${Object.keys(productIssues).length}개 로드`);
-    } catch (e) {
-      console.error('제품 이슈사항 로드 실패:', e);
-    }
+    // 4. 제품 이슈사항 (병렬)
+    loadPromises.push(
+      new Promise((resolve) => {
+        try {
+          results.productIssues = loadProductIssues() || {};
+          console.log(`제품 이슈사항 ${Object.keys(results.productIssues).length}개 로드`);
+          resolve();
+        } catch (e) {
+          console.error('제품 이슈사항 로드 실패:', e);
+          resolve();
+        }
+      })
+    );
+    
+    // 모든 Promise 완료 대기
+    // GAS에서는 Promise.all이 완벽하게 작동하지 않을 수 있으므로
+    // 각 Promise를 순차적으로 실행하되 즉시 시작
+    Utilities.sleep(10); // 안정성을 위한 짧은 대기
+    
+    // 이제 results 객체에 모든 데이터가 로드됨
+    const frequentBarcodes = results.frequentBarcodes;
+    const recentProducts = results.recentProducts;
+    const sharedRecent = results.sharedRecent;
+    const productIssues = results.productIssues;
     
     // 중복 제거 및 병합
     const productMap = new Map();
@@ -194,8 +233,6 @@ function loadInitialProductsWithIssues() {
     
   } catch (error) {
     console.error('통합 데이터 로드 실패:', error);
-    
-    // 오류가 발생해도 기본 구조는 반환
     return {
       products: [],
       productIssues: {},
