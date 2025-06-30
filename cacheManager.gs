@@ -1,4 +1,5 @@
 
+
 // ===== 캐시 관리자 cacheManager.gs =====
 const CACHE_KEYS = {
   FREQUENT_BARCODES: 'frequentBarcodes',
@@ -21,11 +22,12 @@ const CACHE_KEYS = {
   TOP_PRODUCTS: 'topProducts'
 };
 
+// cacheManager.gs의 CACHE_DURATION 수정
 const CACHE_DURATION = {
-  SHORT: 300,    // 5분
-  MEDIUM: 3600,  // 1시간
-  LONG: 21600,   // 6시간
-  DAY: 86400     // 24시간
+  SHORT: 300,    // 5분 (기존 유지)
+  MEDIUM: 1800,  // 30분 (1시간→30분)
+  LONG: 7200,    // 2시간 (24시간→2시간)
+  SALES: 1800    // 30분 (판매 데이터 전용)
 };
 
 const CACHE_CONFIG = {
@@ -55,6 +57,43 @@ function setCache(key, data, duration = CACHE_DURATION.MEDIUM) {
   } catch (error) {
     console.error('캐시 저장 실패:', error);
     return false;
+  }
+}
+
+// 판매 데이터 캐시 강제 갱신
+function forceSalesDataRefresh() {
+  try {
+    console.log('=== 판매 데이터 강제 갱신 시작 ===');
+    
+    const cache = CacheService.getScriptCache();
+    
+    // 모든 판매 관련 캐시 삭제
+    const settings = getSettings();
+    const periods = [
+      parseInt(settings.salesPeriodShort) || 7,
+      parseInt(settings.salesPeriodLong) || 30
+    ];
+    
+    periods.forEach(period => {
+      const cacheKey = `ALL_SALES_DATA_V2_${period}`;
+      cache.remove(cacheKey);
+      console.log(`캐시 삭제: ${cacheKey}`);
+    });
+    
+    // 새로운 데이터 로드
+    const result = loadAllProductsSalesData();
+    
+    return {
+      success: result.success,
+      message: result.success ? '판매 데이터가 갱신되었습니다' : '갱신 실패',
+      count: result.success ? Object.keys(result.data).length : 0
+    };
+  } catch (error) {
+    console.error('강제 갱신 실패:', error);
+    return {
+      success: false,
+      error: error.toString()
+    };
   }
 }
 
@@ -519,4 +558,3 @@ function forceRefreshSalesData() {
     };
   }
 }
-
