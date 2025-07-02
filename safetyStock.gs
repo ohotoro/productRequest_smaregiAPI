@@ -378,3 +378,43 @@ function getSafetyStockStats() {
     return null;
   }
 }
+
+function processSafetyStockChanges(changes) {
+  try {
+    let deletedCount = 0;
+    let errors = [];
+    
+    // 각 변경사항 처리
+    changes.forEach(change => {
+      try {
+        if (change.action === 'delete') {
+          const result = deleteSafetyStock(change.barcode);
+          if (result.success) {
+            deletedCount++;
+          } else {
+            errors.push(`${change.barcode}: ${result.message}`);
+          }
+        }
+        // 추후 update, add 등 다른 액션도 추가 가능
+      } catch (error) {
+        errors.push(`${change.barcode}: ${error.toString()}`);
+      }
+    });
+    
+    if (errors.length > 0) {
+      return {
+        success: false,
+        message: `일부 항목 처리 실패: ${errors.join(', ')}`
+      };
+    }
+    
+    return {
+      success: true,
+      message: `${deletedCount}개 항목이 삭제되었습니다.`
+    };
+    
+  } catch (error) {
+    console.error('안전재고 변경사항 처리 실패:', error);
+    return { success: false, message: error.toString() };
+  }
+}
