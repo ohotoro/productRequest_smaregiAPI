@@ -71,7 +71,8 @@ const AppState = {
   translations: {},
   categoryRules: {},
   productIssues: {},
-  safetyStockCache: [],
+    safetyStockCache: null,
+  safetyStockCacheTime: null, 
   smaregiData: {},
   smaregiUploadTime: null,
   smaregiDataLoaded: false,
@@ -970,7 +971,7 @@ async function loadSalesDataInBackground() {
     if (result && result.success && result.data) {
       AppState.salesData = result.data;
       AppState.salesDataPartial = true;
-      AppState.salesDataLoaded = true;
+      AppState.salesDataLoaded = false;
       console.log('자주 검색 상품 판매 데이터 로드 완료');
       
       // 현재 검색 결과 업데이트
@@ -983,7 +984,7 @@ async function loadSalesDataInBackground() {
     // 전체 데이터는 나중에
     setTimeout(() => {
       loadRemainingProductsData();
-    }, 10000);
+    }, 5000);
     
   } catch (error) {
     console.error('백그라운드 판매 데이터 로드 실패:', error);
@@ -1063,6 +1064,14 @@ function loadRemainingProductsData() {
 
 // Smaregi 연결 확인 비동기 버전
 function checkSmaregiConnectionAsync() {
+  // 이미 연결 확인했으면 스킵
+  if (AppState.smaregiConnected !== undefined) {
+    return Promise.resolve({ 
+      connected: AppState.smaregiConnected,
+      cached: true 
+    });
+  }
+  
   return new Promise((resolve) => {
     google.script.run
       .withSuccessHandler(function(result) {
@@ -2481,9 +2490,13 @@ function switchTab(tabName) {
   } else if (tabName === 'frequent') {
     loadFrequentItems();
   } else if (tabName === 'settings') {
-    loadSettingsTab(); // 수정
+    loadSettingsTab();
   } else if (tabName === 'safety-stock') {
     loadSafetyStockTab();
+    // 저장 버튼 초기화 추가
+    setTimeout(() => {
+      updateSaveButton();
+    }, 100);
   }
 }
 
@@ -3754,7 +3767,7 @@ function createSalesBadge(barcode, salesData, isSmall = false) {
   }
   
   // 판매 데이터 로드 상태 확인
-  if (!AppState.salesDataLoaded) {
+  if (!AppState.salesDataLoaded && !salesData) {
     return `<span class="product-badge badge-sales sales-loading ${sizeClass}" 
       data-barcode="${barcode}">
       <span class="sales-icon">⏳</span>
@@ -3925,10 +3938,6 @@ function showSalesTooltipModal(e) {
       <div class="tooltip-row">
         <span class="tooltip-label">일평균:</span>
         <span class="tooltip-value">${parseFloat(avg).toFixed(1)}개</span>
-      </div>
-      <div class="tooltip-row">
-        <span class="tooltip-label">추세:</span>
-        <span class="tooltip-value">${trendEmoji} ${trendText}</span>
       </div>
     </div>
   `;
@@ -4112,10 +4121,6 @@ function showSalesInfoModal(barcode) {
             <div class="sales-stat">
               <span class="stat-label">일평균 판매</span>
               <span class="stat-value">${(salesInfo.avgDaily || 0).toFixed(1)}개</span>
-            </div>
-            <div class="sales-stat">
-              <span class="stat-label">판매 추세</span>
-              <span class="stat-value ${trendClass}">${trendText}</span>
             </div>
           </div>
           
@@ -7914,16 +7919,18 @@ function loadSafetyStockTab() {
     return;
   }
   
-  if (cache.safetyStockCache && cache.safetyStockCacheTime) {
+  // 캐시 확인 - 초기값 문제 해결
+  if (AppState.safetyStockCache !== null && AppState.safetyStockCacheTime) {
     const now = new Date();
-    const cacheAge = (now - cache.safetyStockCacheTime) / 1000 / 60;
+    const cacheAge = (now - AppState.safetyStockCacheTime) / 1000 / 60;
     
-    if (cacheAge < 5 && cache.safetyStockCache.length > 0) {
-      displaySafetyStockList(cache.safetyStockCache);
+    if (cacheAge < 5) {
+      displaySafetyStockList(AppState.safetyStockCache);
       return;
     }
   }
   
+  // 로딩 표시
   container.dataset.loading = 'true';
   container.innerHTML = `
     <div class="loading-container">
@@ -7932,16 +7939,20 @@ function loadSafetyStockTab() {
     </div>
   `;
   
+  // 서버에서 데이터 가져오기
   google.script.run
     .withSuccessHandler(function(list) {
       container.dataset.loading = 'false';
       
-      const safeList = list || [];
-      cache.safetyStockCache = safeList;
-      cache.safetyStockCacheTime = new Date();
+      // null이나 undefined가 아닌 배열로 확실히 설정
+      const safeList = Array.isArray(list) ? list : [];
       
-      displaySafetyStockList(safeList);
+      // 캐시 저장
       AppState.safetyStockCache = safeList;
+      AppState.safetyStockCacheTime = new Date();
+      
+      // 목록 표시
+      displaySafetyStockList(safeList);
     })
     .withFailureHandler(function(error) {
       container.dataset.loading = 'false';
@@ -8225,6 +8236,20 @@ function searchProductsForSafety(query) {
   }
 }
 
+function displaySafetySearchResults(results) {
+  const container = document.getElementById('safety-search-results');
+  
+  if (!results || results.length === 0) {
+    container.innerHTML = '<div class="no-results">검색 결과가 없습니다</div>';
+    container.style.display = 'block';
+    return;
+  }
+  
+  // createSafetySearchItem 함수를 사용하여 결과 표시
+  container.innerHTML = results.map(p => createSafetySearchItem(p)).join('');
+  container.style.display = 'block';
+}
+
 function createSafetySearchItem(product) {
   if (!product) return '';
   
@@ -8330,6 +8355,10 @@ function saveSafetyStock() {
       if (result.success) {
         closeModal('safety-stock-modal');
         showQuickSuccess(result.message);
+        
+        AppState.safetyStockCache = null;
+        AppState.safetyStockCacheTime = null;
+        
         loadSafetyStockTab();
       } else {
         showError(result.message);
@@ -8342,27 +8371,98 @@ function saveSafetyStock() {
     .saveSafetyStock(safetyStockData);
 }
 
+let safetyStockChanges = new Map();
+
+// deleteSafetyStock 함수 수정
 function deleteSafetyStock(barcode) {
-  if (!confirm('정말 삭제하시겠습니까?')) return;
+  // 변경사항 추적
+  safetyStockChanges.set(barcode, { action: 'delete' });
+  
+  // UI에서 표시 변경
+  const cards = document.querySelectorAll('.safety-stock-card');
+  cards.forEach(card => {
+    const barcodeEl = card.querySelector('.barcode');
+    if (barcodeEl && barcodeEl.textContent === barcode) {
+      card.style.opacity = '0.5';
+      card.classList.add('deleted');
+    }
+  });
+  
+  updateSaveButton();
+  showQuickSuccess('삭제 예정 - 저장 버튼을 눌러 확정하세요');
+}
+
+// 저장 버튼 업데이트 함수
+function updateSaveButton() {
+  let saveBtn = document.getElementById('save-safety-stock-btn');
+  
+  if (!saveBtn) {
+    // safety-stock-header 찾기 (tab-header가 아님)
+    const headerElement = document.querySelector('#safety-stock-tab .safety-stock-header');
+    
+    if (!headerElement) {
+      console.error('safety-stock-header를 찾을 수 없습니다');
+      return;
+    }
+    
+    // 저장 버튼 생성
+    saveBtn = document.createElement('button');
+    saveBtn.id = 'save-safety-stock-btn';
+    saveBtn.className = 'btn btn-success';
+    saveBtn.onclick = saveAllSafetyStockChanges;
+    saveBtn.style.cssText = 'display: none; margin-left: 10px;';
+    saveBtn.innerHTML = '<span style="margin-right: 6px;">💾</span> 저장';
+    
+    // 추가 버튼 찾기
+    const addBtn = headerElement.querySelector('.btn-primary');
+    
+    if (addBtn) {
+      // 추가 버튼 다음에 삽입
+      addBtn.parentNode.insertBefore(saveBtn, addBtn.nextSibling);
+    } else {
+      // 추가 버튼이 없으면 헤더 끝에 추가
+      headerElement.appendChild(saveBtn);
+    }
+  }
+  
+  // 버튼 표시/숨김 처리
+  if (saveBtn && safetyStockChanges.size > 0) {
+    saveBtn.style.display = 'inline-block';
+    saveBtn.innerHTML = `<span style="margin-right: 6px;">💾</span> 저장 (${safetyStockChanges.size}개 변경)`;
+  } else if (saveBtn) {
+    saveBtn.style.display = 'none';
+  }
+}
+
+// 일괄 저장 함수
+function saveAllSafetyStockChanges() {
+  if (safetyStockChanges.size === 0) return;
   
   showSaveIndicator('loading');
   
+  const changes = Array.from(safetyStockChanges.entries()).map(([barcode, data]) => ({
+    barcode,
+    ...data
+  }));
+  
   google.script.run
     .withSuccessHandler(function(result) {
-      showSaveIndicator('hide');
+      showSaveIndicator('saved');
+      safetyStockChanges.clear();
+      updateSaveButton();
       
-      if (result.success) {
-        showQuickSuccess(result.message);
-        loadSafetyStockTab();
-      } else {
-        showError(result.message);
-      }
+      // 캐시 초기화 및 목록 새로고침
+      AppState.safetyStockCache = null;
+      AppState.safetyStockCacheTime = null;
+      loadSafetyStockTab();
+      
+      showQuickSuccess('변경사항이 저장되었습니다');
     })
     .withFailureHandler(function(error) {
       showSaveIndicator('hide');
-      showError('삭제 실패: ' + error);
+      showError('저장 실패: ' + error);
     })
-    .deleteSafetyStock(barcode);
+    .processSafetyStockChanges(changes);
 }
 
 function resetSafetyStockModal() {
