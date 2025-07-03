@@ -537,22 +537,41 @@ function openOrder(orderId) {
     // 발주 항목 로드
     const items = loadOrderItemsHelper(sheet);
     
-    // ✅ 마지막 작업 발주서로 저장 (이 부분 추가!)
+    // ✅ 마지막 작업 발주서로 저장
     const userProperties = PropertiesService.getUserProperties();
     userProperties.setProperty('currentOrder', JSON.stringify(orderInfo));
-    console.log('currentOrder 저장됨:', orderInfo.fileName);
+    
+    // 🆕 판매 데이터도 함께 반환하도록 추가
+    const barcodes = items.map(item => item.barcode).filter(b => b);
+    const salesData = {};
+    
+    if (barcodes.length > 0) {
+      // 기존 getBatchSalesData 함수 활용
+      const batchResult = getBatchSalesData(barcodes, 30);
+      if (batchResult.success && batchResult.data) {
+        Object.keys(batchResult.data).forEach(barcode => {
+          const data = batchResult.data[barcode];
+          salesData[barcode] = {
+            quantity: data.quantity || data.lastLongDays || 0,
+            avgDaily: data.avgDaily || data.dailyAverage || 0,
+            trend: data.trend || 'stable'
+          };
+        });
+      }
+    }
     
     return {
       success: true,
       orderInfo: orderInfo,
-      items: items
+      items: items,
+      salesData: salesData  // 🆕 추가
     };
     
   } catch (error) {
     console.error('발주서 열기 실패:', error);
-    return {
-      success: false,
-      message: '발주서를 열 수 없습니다: ' + error.toString()
+    return { 
+      success: false, 
+      message: '발주서를 열 수 없습니다: ' + error.toString() 
     };
   }
 }
@@ -672,74 +691,24 @@ function batchUpdateSharedRecentProducts(products) {
 // orderRecipient.gs의 getLastWorkingOrder 함수 교체
 
 function getLastWorkingOrder() {
-  const debugInfo = {
-    step: 0,
-    userEmail: 'unknown',
-    hasCurrentOrder: false,
-    orderData: null,
-    error: null
-  };
-  
   try {
-    debugInfo.step = 1;
-    debugInfo.userEmail = Session.getActiveUser().getEmail();
-    
     const userProperties = PropertiesService.getUserProperties();
     const currentOrderData = userProperties.getProperty('currentOrder');
     
-    debugInfo.step = 2;
-    debugInfo.hasCurrentOrder = !!currentOrderData;
-    
     if (!currentOrderData) {
-      console.log('디버그:', JSON.stringify(debugInfo));
       return null;
     }
     
-    debugInfo.step = 3;
     const orderInfo = JSON.parse(currentOrderData);
-    debugInfo.orderData = {
+    
+    // 스프레드시트 확인 과정 제거하고 바로 반환
+    return {
       orderId: orderInfo.orderId,
-      fileName: orderInfo.fileName,
-      createdAt: orderInfo.createdAt
+      orderName: orderInfo.fileName || '이름 없음'
     };
     
-    // 날짜 체크 건너뛰기 (일단)
-    
-    debugInfo.step = 4;
-    // 발주서가 실제로 존재하는지 확인
-    try {
-      const ss = SpreadsheetApp.openById(orderInfo.orderId);
-      debugInfo.step = 5;
-      
-      const sheet = ss.getSheetByName('발주서');
-      debugInfo.step = 6;
-      
-      if (!sheet) {
-        debugInfo.error = '발주서 시트 없음';
-        console.log('디버그:', JSON.stringify(debugInfo));
-        userProperties.deleteProperty('currentOrder');
-        return null;
-      }
-      
-      debugInfo.step = 7;
-      console.log('성공 디버그:', JSON.stringify(debugInfo));
-      
-      return {
-        orderId: orderInfo.orderId,
-        orderName: orderInfo.fileName || '이름 없음'
-      };
-      
-    } catch (error) {
-      debugInfo.step = 8;
-      debugInfo.error = error.toString();
-      console.log('에러 디버그:', JSON.stringify(debugInfo));
-      userProperties.deleteProperty('currentOrder');
-      return null;
-    }
-    
   } catch (error) {
-    debugInfo.error = error.toString();
-    console.log('전체 에러 디버그:', JSON.stringify(debugInfo));
+    console.error('getLastWorkingOrder 에러:', error);
     return null;
   }
 }
