@@ -4932,11 +4932,13 @@ function getProductsSalesData(barcodes) {
 
 function loadSalesDataForBarcodes(barcodes, period = 30) {
   try {
+    console.log(`=== loadSalesDataForBarcodes 호출: ${barcodes.length}개, ${period}일 ===`);
+    
     const salesData = {};
     
     // API 연결 확인
     if (!isSmaregiAvailable()) {
-      console.log('Smaregi API 미연결');
+      console.log('Smaregi API 미연결 - 빈 데이터 반환');
       barcodes.forEach(barcode => {
         salesData[barcode] = {
           quantity: 0,
@@ -4954,7 +4956,7 @@ function loadSalesDataForBarcodes(barcodes, period = 30) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - period);
     
-    console.log(`판매 데이터 조회: ${barcodes.length}개 상품, ${period}일`);
+    console.log(`판매 데이터 조회 기간: ${startDate.toISOString()} ~ ${endDate.toISOString()}`);
     
     // 바코드별로 기본 구조 생성
     barcodes.forEach(barcode => {
@@ -4971,46 +4973,57 @@ function loadSalesDataForBarcodes(barcodes, period = 30) {
     if (CONFIG && CONFIG.PLATFORM_CONFIG) {
       const config = getCurrentConfig();
       if (config.CLIENT_ID && config.CLIENT_SECRET) {
+        console.log('Platform API로 판매 데이터 조회');
+        
         // getSimpleSalesDataV2 활용
         const result = getSimpleSalesDataV2(period);
         
         if (result.success && result.data) {
+          console.log(`Platform API 응답: ${Object.keys(result.data).length}개 상품`);
+          
           barcodes.forEach(barcode => {
             if (result.data[barcode]) {
+              const itemData = result.data[barcode];
               salesData[barcode] = {
-                quantity: result.data[barcode].quantity || 0,
-                amount: result.data[barcode].amount || 0,
-                avgDaily: parseFloat(((result.data[barcode].quantity || 0) / period).toFixed(1)),
-                trend: result.data[barcode].trend || 'stable',
-                transactions: result.data[barcode].transactions || []
+                quantity: itemData.quantity || 0,
+                amount: itemData.amount || 0,
+                avgDaily: itemData.avgDaily || parseFloat(((itemData.quantity || 0) / period).toFixed(1)),
+                trend: itemData.trend || 'stable',
+                transactions: itemData.transactions || []
               };
+              console.log(`바코드 ${barcode}: ${salesData[barcode].quantity}개 판매`);
             }
           });
+        } else {
+          console.log('Platform API 판매 데이터 조회 실패');
         }
         
         return salesData;
       }
     }
     
-    // Legacy API fallback
-    const batchSize = 10;
-    for (let i = 0; i < barcodes.length; i += batchSize) {
-      const batch = barcodes.slice(i, i + batchSize);
-      
-      try {
-        // 기존 함수 활용 (있다면)
-        const batchData = getSalesDataForProducts(batch, startDate, endDate);
-        Object.assign(salesData, batchData);
-      } catch (e) {
-        console.error(`배치 ${i}-${i + batchSize} 조회 실패:`, e);
-      }
-    }
+    // Legacy API fallback (필요한 경우)
+    console.log('Legacy API는 지원하지 않음');
     
     return salesData;
     
   } catch (error) {
-    console.error('판매 데이터 조회 실패:', error);
-    return {};
+    console.error('loadSalesDataForBarcodes 오류:', error);
+    
+    // 에러 시에도 빈 데이터 반환
+    const errorData = {};
+    barcodes.forEach(barcode => {
+      errorData[barcode] = {
+        quantity: 0,
+        amount: 0,
+        avgDaily: 0,
+        trend: 'stable',
+        transactions: [],
+        error: true
+      };
+    });
+    
+    return errorData;
   }
 }
 
@@ -5227,12 +5240,18 @@ function getInitialLoadData() {
  * 전체 상품의 판매 데이터 로드 (웹앱용)
  * @returns {Object} 전체 판매 데이터
  */
+/**
+ * 전체 상품의 판매 데이터 로드 (타임아웃 포함)
+ * @returns {Object} 전체 판매 데이터
+ */
 function loadAllProductsSalesData() {
   try {
-    console.log('=== 판매 데이터 로드 (병렬) ===');
+    console.log('=== 판매 데이터 로드 시작 ===');
+    const startTime = new Date();
     
     // API 연결 확인
     if (!isSmaregiAvailable()) {
+      console.log('Smaregi API 미연결');
       return {
         success: false,
         data: {},
@@ -5244,7 +5263,7 @@ function loadAllProductsSalesData() {
     const settings = getSettings();
     const longPeriod = Math.min(parseInt(settings.salesPeriodLong) || 30, 31);
     
-    // 전체 캐시 확인
+    // 캐시 확인
     const cacheKey = `ALL_SALES_DATA_SIMPLE_${longPeriod}`;
     const cached = getCache(cacheKey);
     
@@ -5253,15 +5272,36 @@ function loadAllProductsSalesData() {
       if (cacheAge < 360) { // 6시간
         console.log(`캐시 사용 (${Math.round(cacheAge)}분 경과)`);
         return {
-          ...cached,
+          success: true,
+          data: cached.data,
+          period: longPeriod,
+          timestamp: cached.timestamp,
           fromCache: true,
-          cacheAge: Math.round(cacheAge)
+          cacheAge: Math.round(cacheAge),
+          count: Object.keys(cached.data).length
         };
       }
     }
     
-    // 수정된 함수로 데이터 조회
+    // 타임아웃 설정 (25초)
+    const timeout = 25000;
+    const timeoutTime = startTime.getTime() + timeout;
+    
+    console.log(`Platform API로 ${longPeriod}일 판매 데이터 조회`);
+    
+    // getSimpleSalesDataV2 사용 (이미 최적화된 함수)
     const salesResult = getSimpleSalesDataV2(longPeriod);
+    
+    // 타임아웃 체크
+    if (new Date().getTime() > timeoutTime) {
+      console.warn('판매 데이터 로드 타임아웃');
+      return {
+        success: false,
+        message: '판매 데이터 로드 시간 초과',
+        data: {},
+        timestamp: new Date().toISOString()
+      };
+    }
     
     if (!salesResult.success) {
       console.error('판매 데이터 조회 실패:', salesResult.error);
@@ -5273,45 +5313,58 @@ function loadAllProductsSalesData() {
       };
     }
     
-    // 바코드 = 제품코드이므로 데이터 그대로 사용
+    // 데이터 형식 변환
     const formattedData = {};
+    let processedCount = 0;
     
-    Object.entries(salesResult.data).forEach(([productCode, data]) => {
-      // Smaregi에서는 바코드 = 제품코드
-      const barcode = productCode;
+    if (salesResult.data && typeof salesResult.data === 'object') {
+      const entries = Object.entries(salesResult.data);
+      const totalEntries = entries.length;
       
-      formattedData[barcode] = {
-        ...data,
-        barcode: barcode,
-        avgDaily: data.avgDaily || parseFloat((data.quantity / longPeriod).toFixed(1))
-      };
-      
-      // 개별 캐시도 저장
-      const cacheDuration = getSmartCacheDuration(barcode, data);
-      const individualCache = {
-        data: formattedData[barcode],
+      for (const [productCode, item] of entries) {
+        // 타임아웃 체크 (매 100개마다)
+        if (processedCount % 100 === 0 && new Date().getTime() > timeoutTime) {
+          console.warn(`타임아웃: ${processedCount}/${totalEntries}개 처리`);
+          break;
+        }
+        
+        const barcode = productCode;
+        formattedData[barcode] = {
+          barcode: barcode,
+          productCode: productCode,
+          productName: item.productName || '',
+          quantity: item.quantity || 0,
+          avgDaily: item.avgDaily || parseFloat(((item.quantity || 0) / longPeriod).toFixed(1)),
+          amount: item.amount || 0,
+          trend: item.trend || 'stable',
+          transactions: item.transactions || 0,
+          lastUpdate: new Date().toISOString()
+        };
+        
+        processedCount++;
+      }
+    }
+    
+    const loadTime = new Date() - startTime;
+    console.log(`${processedCount}개 상품 판매 데이터 로드 완료 (${loadTime}ms)`);
+    
+    // 캐시 저장 (처리된 데이터만)
+    if (processedCount > 0) {
+      const resultData = {
+        data: formattedData,
         timestamp: new Date().toISOString()
       };
-      setCache(`sales_${barcode}_${longPeriod}`, individualCache, cacheDuration);
-    });
-    
-    console.log(`${Object.keys(formattedData).length}개 상품 판매 데이터 로드 완료`);
-    
-    // 전체 캐시 저장
-    const resultData = {
-      data: formattedData,
-      timestamp: new Date().toISOString(),
-      count: Object.keys(formattedData).length
-    };
-    
-    setCache(cacheKey, resultData, 21600); // 6시간
+      setCache(cacheKey, resultData, 21600); // 6시간
+    }
     
     return {
       success: true,
-      ...resultData,
+      data: formattedData,
       period: longPeriod,
+      timestamp: new Date().toISOString(),
+      count: processedCount,
       fromCache: false,
-      cacheAge: 0
+      loadTime: loadTime
     };
     
   } catch (error) {
@@ -5319,8 +5372,8 @@ function loadAllProductsSalesData() {
     return {
       success: false,
       data: {},
-      error: error.toString()
+      error: error.toString(),
+      timestamp: new Date().toISOString()
     };
   }
 }
-
