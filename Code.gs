@@ -2731,6 +2731,13 @@ function loadOrderItemsSafe(orderId) {
 
 // 발주서 저장 시 버전 관리 부분에서 17열로 확장
 function saveToOrderSheetWithVersion(items) {
+    if (!items || items.length === 0) {
+    console.warn('빈 배열로 저장 시도 차단');
+    return { 
+      success: false, 
+      message: '저장할 항목이 없습니다.' 
+    };
+  }
   const lockService = LockService.getScriptLock();
   
   try {
