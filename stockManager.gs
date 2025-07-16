@@ -1,5 +1,58 @@
 // ===== 재고 관리 함수 stockManager.gs =====
 
+// CSV 라인 파싱 - 강력한 버전
+function parseCSVLineRobust(line) {
+  // Papa Parse 스타일의 CSV 파싱
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  let i = 0;
+  
+  // 전체 줄이 따옴표로 감싸여 있으면 제거
+  if (line.startsWith('"') && line.endsWith('"') && line.charAt(1) !== '"') {
+    line = line.substring(1, line.length - 1);
+  }
+  
+  while (i < line.length) {
+    const char = line[i];
+    
+    if (inQuotes) {
+      if (char === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          // 이스케이프된 따옴표
+          current += '"';
+          i += 2;
+        } else {
+          // 따옴표 종료
+          inQuotes = false;
+          i++;
+        }
+      } else {
+        current += char;
+        i++;
+      }
+    } else {
+      if (char === '"') {
+        // 따옴표 시작
+        inQuotes = true;
+        i++;
+      } else if (char === ',') {
+        // 필드 구분자
+        result.push(current.trim());
+        current = '';
+        i++;
+      } else {
+        current += char;
+        i++;
+      }
+    }
+  }
+  
+  // 마지막 필드
+  result.push(current.trim());
+  
+  return result;
+}
 
 // 기존 CSV 라인 파싱 (폴백용)
 function parseCSVLine(line) {
@@ -144,6 +197,17 @@ function processStockCSV(csvContent, updateType) {
       saved = saveStockDataToSheet(stockData);
     } catch (saveError) {
       console.error('스프레드시트 저장 실패:', saveError);
+    }
+    
+    // 현재 발주서에도 스마트재고 시트 생성/업데이트
+    try {
+      const currentOrder = getCurrentOrder();
+      if (currentOrder && currentOrder.orderId) {
+        saveStockDataToOrderSheet(currentOrder.orderId, stockData);
+        console.log('현재 발주서에 스마트재고 시트 업데이트 완료');
+      }
+    } catch (orderSaveError) {
+      console.error('발주서 스마트재고 저장 실패:', orderSaveError);
     }
     
     return {
@@ -529,6 +593,68 @@ function saveStockDataToSheet(stockData) {
     
   } catch (error) {
     console.error('재고 데이터 저장 실패:', error);
+    return false;
+  }
+}
+
+// 현재 발주서에 스마트재고 시트 생성/업데이트
+function saveStockDataToOrderSheet(orderId, stockData) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    let sheet = ss.getSheetByName('스마트재고');
+    
+    // 시트가 없으면 생성
+    if (!sheet) {
+      sheet = ss.insertSheet('스마트재고');
+      const headers = [
+        '바코드', '상품명', '옵션', '현재재고', '가용재고', 
+        '미입금수량', '미출고수량', '공급사명', '공급사상품명', '업데이트시간'
+      ];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setFontWeight('bold')
+        .setBackground('#e3f2fd');
+      
+      // 컴럼 너비 설정
+      const widths = [120, 200, 150, 100, 100, 100, 100, 150, 200, 150];
+      widths.forEach((width, index) => {
+        sheet.setColumnWidth(index + 1, width);
+      });
+    }
+    
+    // 기존 데이터 삭제
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.deleteRows(2, lastRow - 1);
+    }
+    
+    // 새 데이터 추가
+    const rows = Object.values(stockData).map(item => [
+      item.barcode,
+      item.productName,
+      item.option,
+      item.currentStock,
+      item.availableStock,
+      item.unpaidQuantity,
+      item.unshippedOrders,
+      item.supplierName,
+      item.supplierProductName,
+      new Date()
+    ]);
+    
+    if (rows.length > 0) {
+      // 대량 데이터는 배치로 처리
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, Math.min(i + BATCH_SIZE, rows.length));
+        sheet.getRange(2 + i, 1, batch.length, 10).setValues(batch);
+      }
+    }
+    
+    console.log(`발주서에 ${rows.length}개 스마트재고 데이터 저장 완료`);
+    return true;
+    
+  } catch (error) {
+    console.error('발주서 스마트재고 저장 실패:', error);
     return false;
   }
 }
