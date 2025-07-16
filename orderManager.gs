@@ -16,7 +16,10 @@ function updateItemStockStatus(orderId, itemId, stockStatus) {
       return { success: false, message: '발주 항목이 없습니다.' };
     }
     
-    const dataRange = sheet.getRange(7, 1, lastRow - 6, 13);
+    // 19열까지 모두 읽기 (P, Q, R, S 열 포함)
+    const lastCol = sheet.getLastColumn();
+    const numCols = Math.max(19, lastCol);
+    const dataRange = sheet.getRange(7, 1, lastRow - 6, numCols);
     const values = dataRange.getValues();
     
     // itemId 파싱 (timestamp_barcode 형식 가정)
@@ -28,8 +31,8 @@ function updateItemStockStatus(orderId, itemId, stockStatus) {
         // 재고 상태 업데이트
         values[i][11] = stockStatus; // L열: 재고가능여부
         
-        // 변경사항 저장
-        dataRange.setValues(values);
+        // 변경사항 저장 (19열 모두 유지)
+        sheet.getRange(7, 1, values.length, values[0].length).setValues(values);
         
         // 메타데이터 업데이트
         updateOrderMetadata(sheet, 'stockCheck');
@@ -65,8 +68,10 @@ function updateBulkStockStatus(orderId, updates) {
       return { success: false, message: '발주 항목이 없습니다.' };
     }
     
-    // 모든 데이터 한 번에 읽기
-    const dataRange = sheet.getRange(7, 1, lastRow - 6, 13);
+    // 19열까지 모두 읽기 (P, Q, R, S 열 포함)
+    const lastCol = sheet.getLastColumn();
+    const numCols = Math.max(19, lastCol);
+    const dataRange = sheet.getRange(7, 1, lastRow - 6, numCols);
     const values = dataRange.getValues();
     
     // 업데이트 맵 생성 (빠른 검색을 위해)
@@ -86,9 +91,9 @@ function updateBulkStockStatus(orderId, updates) {
       }
     }
     
-    // 변경사항이 있으면 한 번에 저장
+    // 변경사항이 있으면 한 번에 저장 (19열 모두 유지)
     if (updatedCount > 0) {
-      dataRange.setValues(values);
+      sheet.getRange(7, 1, values.length, values[0].length).setValues(values);
       updateOrderMetadata(sheet, 'stockCheck');
     }
     
