@@ -1,4 +1,18 @@
 // ===== 발주처 관리 함수 =====
+
+// 현재 발주서 정보 가져오기
+function getCurrentOrder() {
+  try {
+    const userProperties = PropertiesService.getUserProperties();
+    const currentOrder = userProperties.getProperty('currentOrder');
+    
+    return currentOrder ? JSON.parse(currentOrder) : null;
+  } catch (error) {
+    console.error('현재 발주서 정보 조회 실패:', error);
+    return null;
+  }
+}
+
 // 발주처 목록 가져오기 (캐시 적용)
 function getOrderRecipientsList() {
   try {
@@ -256,17 +270,54 @@ function createOrderSpreadsheet(fileName, recipientName, recipientDetails, fileN
   // 헤더 설정
   setupOrderHeader(sheet, recipientName, recipientDetails, fileNumber, date);
   
-  // 상품 목록 헤더
+  // 상품 목록 헤더 (19개 열 모두 포함)
   const headers = [
-    '바코드', '상품명', '옵션', '발주수량', '단가', '금액',
-    '중량', '우선순위', '코멘트', '상태', '확정시간', '재고가능여부', '공급사'
+    '바코드',        // A열
+    '상품명',        // B열
+    '옵션',          // C열
+    '발주수량',      // D열
+    '단가',          // E열
+    '금액',          // F열
+    '중량',          // G열
+    '우선순위',      // H열
+    '코멘트',        // I열
+    '상태',          // J열
+    '확정시간',      // K열
+    '재고가능여부',  // L열
+    '공급사',        // M열
+    '내보내기시간',    // N열
+    'CSV확인',       // O열
+    '박스번호',      // P열
+    '출고가능수량',  // Q열
+    '출고상태',      // R열
+    '출고완료시간'   // S열
   ];
   sheet.getRange(6, 1, 1, headers.length).setValues([headers])
     .setFontWeight('bold')
     .setBackground('#f0f0f0');
   
-  // 컬럼 너비 설정
-  const widths = [120, 200, 150, 80, 100, 120, 80, 80, 200, 80, 120, 120, 150];
+  // 컬럼 너비 설정 (19개 열)
+  const widths = [
+    120,  // A: 바코드
+    200,  // B: 상품명
+    150,  // C: 옵션
+    80,   // D: 발주수량
+    100,  // E: 단가
+    120,  // F: 금액
+    80,   // G: 중량
+    80,   // H: 우선순위
+    200,  // I: 코멘트
+    80,   // J: 상태
+    120,  // K: 확정시간
+    120,  // L: 재고가능여부
+    150,  // M: 공급사
+    120,  // N: 내보내기시간
+    60,   // O: CSV확인
+    150,  // P: 박스번호
+    100,  // Q: 출고가능수량
+    100,  // R: 출고상태
+    120   // S: 출고완료시간
+  ];
   widths.forEach((width, index) => {
     sheet.setColumnWidth(index + 1, width);
   });
@@ -438,9 +489,32 @@ function saveToOrderSheet(items) {
     const ss = SpreadsheetApp.openById(currentOrder.orderId);
     const sheet = ss.getSheetByName('발주서');
     
-    // 기존 데이터 삭제
+    // 기존 데이터 백업 (P, Q, R, S 열 보존)
     const lastRow = sheet.getLastRow();
+    let existingData = [];
     if (lastRow > 6) {
+      const lastCol = sheet.getLastColumn();
+      const numCols = Math.max(19, lastCol);
+      existingData = sheet.getRange(7, 1, lastRow - 6, numCols).getValues();
+      
+      // 바코드별로 기존 데이터 맵 생성 (N~S열 보존)
+      const existingDataMap = new Map();
+      existingData.forEach((row, index) => {
+        const barcode = String(row[0]);
+        if (!existingDataMap.has(barcode)) {
+          existingDataMap.set(barcode, []);
+        }
+        existingDataMap.get(barcode).push({
+          index: index,
+          nColumn: row[13] || '', // N열: 내보내기 시간
+          oColumn: row[14] || '', // O열: CSV확인
+          pColumn: row[15] || '', // P열: 박스번호
+          qColumn: row[16] || '', // Q열: 출고가능수량
+          rColumn: row[17] || '', // R열: 출고상태
+          sColumn: row[18] || ''  // S열: 출고완료시간
+        });
+      });
+      
       sheet.deleteRows(7, lastRow - 6);
     }
     
@@ -454,20 +528,41 @@ function saveToOrderSheet(items) {
           stockAvailable = `${stockAvailable}개만 가능`;
         }
         
+        // 기존 N~S열 데이터 찾기
+        let nCol = '', oCol = '', pCol = '', qCol = '', rCol = '', sCol = '';
+        if (existingDataMap && existingDataMap.has(item.barcode)) {
+          const matches = existingDataMap.get(item.barcode);
+          if (matches.length > 0) {
+            // 첫 번째 매칭 데이터 사용 (중복 바코드의 경우)
+            nCol = matches[0].nColumn;
+            oCol = matches[0].oColumn;
+            pCol = matches[0].pColumn;
+            qCol = matches[0].qColumn;
+            rCol = matches[0].rColumn;
+            sCol = matches[0].sColumn;
+          }
+        }
+        
         return [
-          item.barcode,
-          item.name,
-          item.option,
-          item.quantity,
-          item.purchasePrice || 0,
-          item.quantity * (item.purchasePrice || 0),
-          item.weight || '',
-          item.priority || 3,
-          item.comment || '',
-          item.status || '대기',
-          item.confirmedAt || '',
-          stockAvailable,
-          item.supplierName || ''
+          item.barcode,            // A열
+          item.name,                // B열
+          item.option,              // C열
+          item.quantity,            // D열
+          item.purchasePrice || 0,  // E열
+          item.quantity * (item.purchasePrice || 0), // F열
+          item.weight || '',        // G열
+          item.priority || 3,       // H열
+          item.comment || '',       // I열
+          item.status || '대기',    // J열
+          item.confirmedAt || '',   // K열
+          stockAvailable,           // L열
+          item.supplierName || '',  // M열
+          nCol,                     // N열: 내보내기 시간 (보존)
+          oCol,                     // O열: CSV확인 (보존)
+          pCol,                     // P열: 박스번호 (보존)
+          qCol,                     // Q열: 출고가능수량 (보존)
+          rCol,                     // R열: 출고상태 (보존)
+          sCol                      // S열: 출고완료시간 (보존)
         ];
       });
       
@@ -534,44 +629,24 @@ function openOrder(orderId) {
     // 발주서 정보 추출
     const orderInfo = extractOrderInfo(sheet, ss, orderId);
     
-    // 발주 항목 로드
+    // 발주 항목 로드 - 함수명 변경
     const items = loadOrderItemsHelper(sheet);
     
-    // ✅ 마지막 작업 발주서로 저장
+    // 현재 발주서 정보 저장
     const userProperties = PropertiesService.getUserProperties();
     userProperties.setProperty('currentOrder', JSON.stringify(orderInfo));
-    
-    // 🆕 판매 데이터도 함께 반환하도록 추가
-    const barcodes = items.map(item => item.barcode).filter(b => b);
-    const salesData = {};
-    
-    if (barcodes.length > 0) {
-      // 기존 getBatchSalesData 함수 활용
-      const batchResult = getBatchSalesData(barcodes, 30);
-      if (batchResult.success && batchResult.data) {
-        Object.keys(batchResult.data).forEach(barcode => {
-          const data = batchResult.data[barcode];
-          salesData[barcode] = {
-            quantity: data.quantity || data.lastLongDays || 0,
-            avgDaily: data.avgDaily || data.dailyAverage || 0,
-            trend: data.trend || 'stable'
-          };
-        });
-      }
-    }
     
     return {
       success: true,
       orderInfo: orderInfo,
-      items: items,
-      salesData: salesData  // 🆕 추가
+      items: items
     };
     
   } catch (error) {
     console.error('발주서 열기 실패:', error);
-    return { 
-      success: false, 
-      message: '발주서를 열 수 없습니다: ' + error.toString() 
+    return {
+      success: false,
+      message: '발주서를 열 수 없습니다: ' + error.toString()
     };
   }
 }
@@ -685,30 +760,5 @@ function batchUpdateSharedRecentProducts(products) {
     
   } catch (error) {
     console.error('배치 공유 상품 업데이트 실패:', error);
-  }
-}
-
-// orderRecipient.gs의 getLastWorkingOrder 함수 교체
-
-function getLastWorkingOrder() {
-  try {
-    const userProperties = PropertiesService.getUserProperties();
-    const currentOrderData = userProperties.getProperty('currentOrder');
-    
-    if (!currentOrderData) {
-      return null;
-    }
-    
-    const orderInfo = JSON.parse(currentOrderData);
-    
-    // 스프레드시트 확인 과정 제거하고 바로 반환
-    return {
-      orderId: orderInfo.orderId,
-      orderName: orderInfo.fileName || '이름 없음'
-    };
-    
-  } catch (error) {
-    console.error('getLastWorkingOrder 에러:', error);
-    return null;
   }
 }
