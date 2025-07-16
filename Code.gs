@@ -831,24 +831,6 @@ function getCurrentOrder() {
       const lastRow = sheet.getLastRow();
       const hasData = lastRow > 6;
       
-      // 디버그 로그 추가
-      console.log('getCurrentOrder 디버그:', {
-        orderId: currentOrder.orderId,
-        lastRow: lastRow,
-        hasData: hasData,
-        sheetName: sheet.getName()
-      });
-      
-      // 실제 데이터 확인 (7행의 첫 번째 열 확인)
-      if (lastRow >= 7) {
-        try {
-          const firstDataCell = sheet.getRange(7, 1).getValue();
-          console.log('7행 첫 번째 셀 값:', firstDataCell);
-        } catch (e) {
-          console.log('7행 데이터 읽기 실패:', e);
-        }
-      }
-      
       // 발주처 정보 업데이트 (B2 셀)
       try {
         currentOrder.recipientName = sheet.getRange(2, 2).getValue() || currentOrder.recipientName;
@@ -2771,8 +2753,45 @@ function saveToOrderSheetWithVersion(items) {
       });
     }
     
-    // 기존 데이터 삭제 (한 번만 수행)
+    // 기존 P열, R열, S열 데이터 백업
+    // lastRow는 이미 위에서 선언됨
+    let existingRSData = [];
+    let existingDataByBarcode = {}; // 바코드별 데이터 맵 추가
+    
     if (lastRow > 6) {
+      const lastCol = sheet.getLastColumn();
+      if (lastCol >= 19) {
+        // 바코드와 행 인덱스를 포함한 맵 생성
+        const allData = sheet.getRange(7, 1, lastRow - 6, 19).getValues();
+        existingRSData = allData.map((row, index) => ({
+          barcode: String(row[0]),
+          rowIndex: index,
+          pColumn: row[15] || '', // P열: 박스번호
+          rColumn: row[17] || '', // R열: 출고상태
+          sColumn: row[18] || ''  // S열: 출고완료시간
+        }));
+        
+        // 바코드별 맵 생성 (가장 최근 값 유지)
+        existingRSData.forEach(data => {
+          if (data.barcode && (data.pColumn || data.rColumn || data.sColumn)) {
+            existingDataByBarcode[data.barcode] = data;
+          }
+        });
+      }
+      sheet.deleteRows(7, lastRow - 6);
+    }
+    
+    // 기존 데이터 삭제 전 백업
+    const existingDataBackup = [];
+    if (lastRow > 6) {
+      const allData = sheet.getRange(7, 1, lastRow - 6, 19).getValues();
+      allData.forEach((row, idx) => {
+        existingDataBackup.push({
+          barcode: String(row[0]),
+          rowIndex: idx,
+          data: row
+        });
+      });
       sheet.deleteRows(7, lastRow - 6);
     }
     
