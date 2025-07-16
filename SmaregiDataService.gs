@@ -1,78 +1,151 @@
-// Code.gs에 이 함수만 추가하세요
-function fixCurrentOrderStockData() {
-  const currentOrder = getCurrentOrder();
-  if (!currentOrder) {
-    return { success: false, message: '열려있는 발주서가 없습니다.' };
-  }
+// SmaregiData 서비스 - 효율적인 데이터 관리
+const SmaregiDataService = {
+  // 캐시 설정
+  CACHE_DURATION: 3600, // 1시간
+  BATCH_SIZE: 50,      // 배치 크기
   
-  const orderId = currentOrder.orderId;
-  
-  try {
-    const ss = SpreadsheetApp.openById(orderId);
-    const sheet = ss.getSheetByName('발주서');
-    
-    if (!sheet) {
-      return { success: false, message: '발주서를 찾을 수 없습니다.' };
-    }
-    
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 7) {
-      return { success: false, message: '발주 항목이 없습니다.' };
-    }
-    
-    const dataRange = sheet.getRange(7, 1, lastRow - 6, 17);
-    const values = dataRange.getValues();
-    
-    let updatedCount = 0;
-    
-    for (let i = 0; i < values.length; i++) {
-      const requestedQty = Number(values[i][3]) || 0; // D열: 요청수량
-      let stockAvailable = String(values[i][11] || '미확인'); // L열: 재고가능여부
-      let needsUpdate = false;
-      
-      // L열 값 정규화 (숫자만 있는 경우)
-      if (!isNaN(stockAvailable) && stockAvailable !== '' && stockAvailable !== '미확인') {
-        stockAvailable = `${stockAvailable}개만 가능`;
-        values[i][11] = stockAvailable; // L열 업데이트
-        needsUpdate = true;
+  // 필요한 상품 ID만 가져오기
+  getSmaregiDataByIds(productIds) {
+    try {
+      if (!productIds || productIds.length === 0) {
+        return {};
       }
       
-      // Q열 재계산
-      let exportableQty = requestedQty;
+      const cache = CacheService.getScriptCache();
+      const result = {};
+      const notInCache = [];
       
-      if (stockAvailable === '품절') {
-        exportableQty = 0;
-      } else if (stockAvailable === '오더중') {
-        exportableQty = 0;
-      } else if (stockAvailable.includes('개만 가능')) {
-        const match = stockAvailable.match(/(\d+)개만 가능/);
-        if (match) {
-          const availableQty = parseInt(match[1]);
-          exportableQty = Math.min(availableQty, requestedQty);
+      // 1. 캐시에서 먼저 조회
+      productIds.forEach(id => {
+        const cached = cache.get(`smaregi_${id}`);
+        if (cached) {
+          result[id] = JSON.parse(cached);
+        } else {
+          notInCache.push(id);
         }
+      });
+      
+      // 2. 캐시에 없는 것만 시트에서 조회
+      if (notInCache.length > 0) {
+        const sheetData = this.getFromSheet(notInCache);
+        Object.entries(sheetData).forEach(([id, data]) => {
+          result[id] = data;
+          // 캐시에 저장
+          cache.put(`smaregi_${id}`, JSON.stringify(data), this.CACHE_DURATION);
+        });
       }
       
-      // Q열 업데이트 필요 여부 확인
-      const currentExportableQty = Number(values[i][16]) || 0;
-      if (currentExportableQty !== exportableQty || needsUpdate) {
-        values[i][16] = exportableQty;
-        updatedCount++;
+      console.log(`SmaregiData 조회: 요청 ${productIds.length}개, 캐시 ${productIds.length - notInCache.length}개`);
+      return result;
+      
+    } catch (error) {
+      console.error('getSmaregiDataByIds 오류:', error);
+      return {};
+    }
+  },
+  
+  // 시트에서 특정 상품들만 조회
+  getFromSheet(productIds) {
+    const ss = SpreadsheetApp.openById('1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E');
+    const sheet = ss.getSheetByName('SmaregiData');
+    
+    if (!sheet) return {};
+    
+    const data = sheet.getDataRange().getValues();
+    const result = {};
+    
+    // Set으로 빠른 조회
+    const idSet = new Set(productIds.map(id => String(id)));
+    
+    for (let i = 1; i < data.length; i++) {
+      const barcode = String(data[i][0]);
+      if (idSet.has(barcode)) {
+        result[barcode] = {
+          stock: parseInt(data[i][2]) || 0,
+          sales30: parseInt(data[i][3]) || 0,
+          sales365: parseInt(data[i][4]) || 0,
+          avgDaily: parseFloat(data[i][5]) || 0,
+          lastSale: String(data[i][8] || '')
+        };
       }
     }
     
-    if (updatedCount > 0) {
-      dataRange.setValues(values);
-      console.log(`${updatedCount}개 항목이 수정되었습니다.`);
+    return result;
+  },
+  
+  // 인기 상품 목록 (캐시됨)
+  getTopProducts(limit = 100) {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = `top_products_${limit}_v2`; // 캐시 키 버전 추가
+    
+    // 캐시 확인
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
     }
     
-    return { 
-      success: true, 
-      message: `${updatedCount}개 항목이 수정되었습니다.`,
-      updatedCount: updatedCount
-    };
+    // 캐시 없으면 계산
+    const ss = SpreadsheetApp.openById('1fhU41XoZQyu0QlVgwQe3zIbWg-CdULl7UMNeLYQLS5E');
+    const sheet = ss.getSheetByName('SmaregiData');
     
-  } catch (error) {
-    console.error('발주서 데이터 수정 실패:', error);
-    return { success: false, message: error.toString() };
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    const products = [];
+    
+    // 모든 상품 수집 (재고가 있거나 판매 이력이 있는 상품)
+    for (let i = 1; i < data.length; i++) {
+      const sales30 = parseInt(data[i][3]) || 0;
+      const stock = parseInt(data[i][2]) || 0;
+      const sales365 = parseInt(data[i][4]) || 0;
+      
+      // 재고가 있거나 1년 내 판매 이력이 있는 상품만 포함
+      if (stock > 0 || sales365 > 0) {
+        products.push({
+          productId: String(data[i][0]),
+          productName: data[i][1],
+          stock: stock,
+          sales30: sales30,
+          sales365: sales365,
+          avgDaily: parseFloat(data[i][5]) || 0
+        });
+      }
+    }
+    
+    // 판매량 순으로 정렬
+    products.sort((a, b) => b.sales30 - a.sales30);
+    const topProducts = products.slice(0, limit);
+    
+    // 캐시 저장
+    cache.put(cacheKey, JSON.stringify(topProducts), this.CACHE_DURATION);
+    
+    return topProducts;
+  },
+  
+  // 캐시 초기화
+  clearCache() {
+    const cache = CacheService.getScriptCache();
+    // 모든 캐시 키 삭제 (버전 포함)
+    cache.remove('top_products_100');
+    cache.remove('top_products_600');
+    cache.remove('top_products_1000');
+    cache.remove('top_products_100_v2');
+    cache.remove('top_products_600_v2');
+    cache.remove('top_products_1000_v2');
+    console.log('SmaregiData 캐시 초기화됨');
   }
+};
+
+// 웹앱용 함수들
+function getSmaregiDataBatch(productIds) {
+  return SmaregiDataService.getSmaregiDataByIds(productIds);
+}
+
+function getTopSmaregiProducts(limit) {
+  return SmaregiDataService.getTopProducts(limit || 100);
+}
+
+function clearSmaregiCache() {
+  SmaregiDataService.clearCache();
+  return { success: true };
 }
