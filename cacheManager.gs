@@ -1,5 +1,3 @@
-
-
 // ===== 캐시 관리자 cacheManager.gs =====
 const CACHE_KEYS = {
   FREQUENT_BARCODES: 'frequentBarcodes',
@@ -17,28 +15,14 @@ const CACHE_KEYS = {
   SMAREGI_DATA: 'smaregiData',
   SMAREGI_TIMESTAMP: 'smaregiTimestamp',
   DASHBOARD_DATA: 'dashboardData',
-  BOX_BARCODES: 'box_barcodes',
-  SUPPLIER_MAP: 'supplierMap',
-  TOP_PRODUCTS: 'topProducts'
+  BOX_BARCODES: 'box_barcodes'
 };
 
-// cacheManager.gs의 CACHE_DURATION 수정
 const CACHE_DURATION = {
-  SHORT: 300,    // 5분 (기존 유지)
-  MEDIUM: 1800,  // 30분 (1시간→30분)
-  LONG: 7200,    // 2시간 (24시간→2시간)
-  SALES: 1800    // 30분 (판매 데이터 전용)
-};
-
-const CACHE_CONFIG = {
-  SALES_DATA: 86400,      // 24시간
-  STOCK_DATA: 3600,       // 1시간 (재고는 자주 변함)
-  PRODUCT_DATA: 604800,   // 7일 (상품 정보는 거의 안 변함)
-  INDIVIDUAL: 86400,      // 24시간
-  
-  // 인기 상품은 더 자주 갱신
-  HOT_PRODUCT_THRESHOLD: 50,  // 30일 판매 50개 이상
-  HOT_PRODUCT_CACHE: 21600,   // 6시간
+  SHORT: 300,    // 5분
+  MEDIUM: 3600,  // 1시간
+  LONG: 21600,   // 6시간
+  DAY: 86400     // 24시간
 };
 
 // 캐시 저장 (최적화)
@@ -57,43 +41,6 @@ function setCache(key, data, duration = CACHE_DURATION.MEDIUM) {
   } catch (error) {
     console.error('캐시 저장 실패:', error);
     return false;
-  }
-}
-
-// 판매 데이터 캐시 강제 갱신
-function forceSalesDataRefresh() {
-  try {
-    console.log('=== 판매 데이터 강제 갱신 시작 ===');
-    
-    const cache = CacheService.getScriptCache();
-    
-    // 모든 판매 관련 캐시 삭제
-    const settings = getSettings();
-    const periods = [
-      parseInt(settings.salesPeriodShort) || 7,
-      parseInt(settings.salesPeriodLong) || 30
-    ];
-    
-    periods.forEach(period => {
-      const cacheKey = `ALL_SALES_DATA_V2_${period}`;
-      cache.remove(cacheKey);
-      console.log(`캐시 삭제: ${cacheKey}`);
-    });
-    
-    // 새로운 데이터 로드
-    const result = loadAllProductsSalesData();
-    
-    return {
-      success: result.success,
-      message: result.success ? '판매 데이터가 갱신되었습니다' : '갱신 실패',
-      count: result.success ? Object.keys(result.data).length : 0
-    };
-  } catch (error) {
-    console.error('강제 갱신 실패:', error);
-    return {
-      success: false,
-      error: error.toString()
-    };
   }
 }
 
@@ -116,33 +63,22 @@ function getCachedBoxBarcodes() {
 function getCache(key) {
   try {
     const cache = CacheService.getScriptCache();
-    const cached = cache.get(key);
     
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        
-        // 캐시 나이 계산 (timestamp가 있는 경우)
-        if (parsed.timestamp) {
-          const age = (new Date() - new Date(parsed.timestamp)) / 1000 / 60; // 분
-          console.log(`캐시 히트: ${key} (${Math.round(age)}분 경과)`);
-        }
-        
-        return parsed;
-      } catch (e) {
-        return cached;
-      }
+    // 먼저 일반 캐시 확인
+    const data = cache.get(key);
+    if (data) {
+      return JSON.parse(data);
     }
     
-    // 일반 캐시에 없으면 청크 캐시 확인
-    const chunkedData = getCacheInChunks(key);
-    if (chunkedData) {
-      return chunkedData;
+    // 청크 데이터 확인
+    const chunkCount = parseInt(cache.get(`${key}_chunks`) || '0');
+    if (chunkCount > 0) {
+      return getCacheInChunks(key);
     }
     
     return null;
   } catch (error) {
-    console.error('캐시 읽기 실패:', error);
+    console.error('캐시 조회 실패:', error);
     return null;
   }
 }
@@ -195,7 +131,6 @@ function setCacheInChunks(key, data, duration = CACHE_DURATION.MEDIUM) {
       cache.put(`${key}_${index}`, JSON.stringify(dataToSave), duration);
     });
     
-    console.log(`청크 캐시 저장 완료: ${chunks.length}개 청크`);
     return true;
   } catch (error) {
     console.error('청크 캐시 저장 실패:', error);
@@ -211,7 +146,7 @@ function getCacheInChunks(key) {
     // 메타데이터 확인
     const metaJson = cache.get(`${key}_meta`);
     if (!metaJson) {
-      // 레거시 방식 시도
+      console.log(`청크 메타데이터 없음: ${key}_meta`);
       return getCacheInChunksLegacy(key);
     }
     
@@ -250,34 +185,29 @@ function getCacheInChunks(key) {
 
 // 레거시 청크 데이터 로드 (하위 호환성)
 function getCacheInChunksLegacy(key) {
-  try {
-    const cache = CacheService.getScriptCache();
-    const chunkCount = parseInt(cache.get(`${key}_chunks`) || '0');
-    
-    if (chunkCount === 0) {
-      return null;
-    }
-    
-    const isArray = cache.get(`${key}_isArray`) === 'true';
-    const result = isArray ? [] : {};
-    
-    for (let i = 0; i < chunkCount; i++) {
-      const chunkJson = cache.get(`${key}_${i}`);
-      if (chunkJson) {
-        const chunkData = JSON.parse(chunkJson);
-        if (isArray) {
-          result.push(...chunkData);
-        } else {
-          Object.assign(result, chunkData);
-        }
-      }
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('레거시 청크 로드 실패:', error);
+  const cache = CacheService.getScriptCache();
+  const chunkCount = parseInt(cache.get(`${key}_chunks`) || '0');
+  
+  if (chunkCount === 0) {
     return null;
   }
+  
+  const isArray = cache.get(`${key}_isArray`) === 'true';
+  const result = isArray ? [] : {};
+  
+  for (let i = 0; i < chunkCount; i++) {
+    const chunkJson = cache.get(`${key}_${i}`);
+    if (chunkJson) {
+      const chunkData = JSON.parse(chunkJson);
+      if (isArray) {
+        result.push(...chunkData);
+      } else {
+        Object.assign(result, chunkData);
+      }
+    }
+  }
+  
+  return result;
 }
 
 // 캐시 무효화 (최적화)
@@ -402,159 +332,60 @@ function getCacheUsage() {
   }
 }
 
-/**
- * 캐시를 무시하고 전체 판매 데이터 강제 갱신
- * @returns {Object} 새로운 판매 데이터
- */
-function refreshAllSalesData() {
+function getInitialDataBundle() {
   try {
-    console.log('=== 판매 데이터 강제 갱신 시작 ===');
+    console.log('데이터 번들 로드 시작');
+    const startTime = new Date();
     
-    // API 연결 확인
-    if (!isSmaregiAvailable()) {
-      return {
-        success: false,
-        data: {},
-        message: 'Smaregi API가 연결되지 않았습니다'
-      };
-    }
-    
-    // 설정에서 기간 가져오기
-    const settings = getSettings();
-    const longPeriod = Math.min(parseInt(settings.salesPeriodLong) || 30, 31);
-    
-    // 기존 캐시 무효화
-    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
+    // 캐시 확인
     const cache = CacheService.getScriptCache();
-    cache.remove(cacheKey);
+    const cached = cache.get('INITIAL_BUNDLE_V1');
     
-    console.log('기존 캐시 삭제 완료');
-    
-    // Platform API로 새로운 데이터 조회
-    const salesResult = getSimpleSalesDataV2(longPeriod);
-    
-    if (!salesResult.success) {
-      console.error('판매 데이터 조회 실패:', salesResult.error);
-      return {
-        success: false,
-        message: salesResult.message || '판매 데이터 조회 실패',
-        data: {},
-        timestamp: new Date().toISOString()
-      };
+    if (cached) {
+      const data = JSON.parse(cached);
+      const age = (new Date() - new Date(data.timestamp)) / 1000 / 60;
+      if (age < 30) {
+        console.log('번들 캐시 사용');
+        return data;
+      }
     }
     
-    // 데이터 형식 변환
-    const formattedData = {};
-    
-    if (salesResult.data && typeof salesResult.data === 'object') {
-      Object.keys(salesResult.data).forEach(productCode => {
-        const item = salesResult.data[productCode];
-        
-        // 바코드-제품코드 매핑 확인
-        const barcodeMapping = getBarcodeToProductCodeMapping();
-        let barcode = productCode;
-        
-        // 역매핑 찾기
-        for (const [bc, pc] of Object.entries(barcodeMapping)) {
-          if (pc === productCode) {
-            barcode = bc;
-            break;
-          }
-        }
-        
-        formattedData[barcode] = {
-          barcode: barcode,
-          productCode: productCode,
-          quantity: item.quantity || 0,
-          avgDaily: parseFloat(((item.quantity || 0) / longPeriod).toFixed(1)),
-          amount: item.amount || 0,
-          trend: item.trend || 'stable',
-          transactions: item.transactions || 0,
-          lastUpdate: new Date().toISOString()
-        };
-      });
-    }
-    
-    console.log(`${Object.keys(formattedData).length}개 상품의 판매 데이터 갱신 완료`);
-    
-    // 새 캐시 저장 (24시간)
-    const resultData = {
-      data: formattedData,
-      timestamp: new Date().toISOString()
-    };
-    
-    setCache(cacheKey, resultData, 86400);
-    
-    // 개별 캐시도 모두 삭제 (다음 조회 시 새로 생성)
-    console.log('개별 캐시 정리 중...');
-    
-    return {
-      success: true,
-      data: formattedData,
-      period: longPeriod,
-      timestamp: resultData.timestamp,
-      count: Object.keys(formattedData).length,
-      refreshed: true
-    };
-    
-  } catch (error) {
-    console.error('판매 데이터 갱신 실패:', error);
-    return {
-      success: false,
-      message: '판매 데이터 갱신 중 오류가 발생했습니다',
-      error: error.toString(),
-      data: {},
-      timestamp: new Date().toISOString()
-    };
-  }
-}
-
-/**
- * 판매 데이터 캐시 삭제 및 강제 갱신
- * @returns {Object} 새로운 판매 데이터
- */
-function forceRefreshSalesData() {
-  try {
-    console.log('=== 판매 데이터 강제 갱신 시작 ===');
-    
-    const settings = getSettings();
-    const longPeriod = Math.min(parseInt(settings.salesPeriodLong) || 30, 31);
-    
-    // 캐시 삭제
-    const cache = CacheService.getScriptCache();
-    const cacheKey = `ALL_SALES_DATA_V2_${longPeriod}`;
-    
-    try {
-      cache.remove(cacheKey);
-      console.log('전체 판매 데이터 캐시 삭제 완료');
-    } catch (e) {
-      console.log('캐시 삭제 중 오류 (무시):', e);
-    }
-    
-    // 개별 캐시도 정리 (선택적)
-    // 이 부분은 성능상 생략 가능
-    
-    // 새로운 데이터 로드
-    const result = loadAllProductsSalesData();
-    
-    if (result.success) {
-      console.log(`강제 갱신 완료: ${result.count}개 상품`);
+    // 모든 초기 데이터를 한 번에 수집
+    const bundle = {
+      // 상품 데이터
+      productsData: loadInitialProductsWithIssues(),
       
-      // 갱신 완료 플래그 추가
-      result.refreshed = true;
-      result.refreshTime = new Date().toISOString();
-      result.fromCache = false;
-      result.cacheAge = 0;
-    }
+      // 설정
+      settings: getSettings(),
+      
+      // 현재 발주서
+      currentOrder: getCurrentOrder(),
+      
+      // Smaregi 데이터
+      smaregiData: {
+        data: getSmaregiData() || {},
+        uploadTime: PropertiesService.getScriptProperties().getProperty('smaregiUploadTime')
+      },
+      
+      // 카테고리 규칙
+      categoryRules: loadCategoryRules(),
+      
+      // 타임스탬프
+      timestamp: new Date().toISOString(),
+      
+      // 로드 시간
+      loadTime: new Date() - startTime
+    };
     
-    return result;
+    // 캐시 저장
+    cache.put('INITIAL_BUNDLE_V1', JSON.stringify(bundle), 1800); // 30분
+    
+    console.log(`번들 생성 완료: ${bundle.loadTime}ms`);
+    return bundle;
     
   } catch (error) {
-    console.error('강제 갱신 실패:', error);
-    return {
-      success: false,
-      message: '판매 데이터 갱신 중 오류가 발생했습니다',
-      error: error.toString()
-    };
+    console.error('데이터 번들 생성 실패:', error);
+    // 실패 시 개별 로드로 폴백
+    return null;
   }
 }
