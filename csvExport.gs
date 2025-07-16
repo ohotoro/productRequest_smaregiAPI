@@ -1,6 +1,47 @@
 // ===== CSV 내보내기 관련 함수 csvExport.gs =====
 
+// 중복 출고 체크 함수
+function checkDuplicateExports(orderId, exportItems) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const sheet = ss.getSheetByName('발주서');
+    
+    if (!sheet) return { hasDuplicates: false };
+    
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 6) return { hasDuplicates: false };
+    
+    // 기존 데이터 읽기
+    const data = sheet.getRange(7, 1, lastRow - 6, 17).getValues();
+    const duplicates = [];
+    
+    // 내보내려는 항목 중 이미 출고된 항목 찾기
+    exportItems.forEach(item => {
+      for (let i = 0; i < data.length; i++) {
+        if (data[i][0] === item.barcode && data[i][13]) { // 바코드 일치하고 이미 내보내기 시간이 있으면
+          duplicates.push({
+            barcode: item.barcode,
+            name: item.name,
+            exportedAt: data[i][13],
+            currentRemaining: data[i][16] ? data[i][16] - (data[i][3] - data[i][16]) : 0
+          });
+        }
+      }
+    });
+    
+    return {
+      hasDuplicates: duplicates.length > 0,
+      duplicates: duplicates
+    };
+    
+  } catch (error) {
+    console.error('중복 체크 실패:', error);
+    return { hasDuplicates: false };
+  }
+}
+
 // CSV 내보내기 메인 함수
+// csvExport.gs의 exportToCSV 함수 수정
 function exportToCSV(orderId, exportItems) {
   console.log('exportToCSV 호출됨');
   console.log('orderId:', orderId);
@@ -12,47 +53,9 @@ function exportToCSV(orderId, exportItems) {
       return { success: false, message: '내보낼 항목이 없습니다.' };
     }
     
-    // ⭐ 서버 사이드에서도 미확인 항목 필터링 추가
-    console.log('미확인 항목 필터링 시작');
-    const filteredItems = exportItems.filter(item => {
-      // 재고 상태 정규화 (trim, 빈 문자열 처리)
-      const stockStatus = item.stockAvailable ? String(item.stockAvailable).trim() : '';
-      
-      // 미확인 상태 체크 (대소문자 무시)
-      if (!stockStatus || stockStatus === '' || stockStatus === '미확인' || stockStatus.toLowerCase() === '미확인') {
-        console.log(`필터링됨 - 재고 미확인: ${item.barcode} - ${item.name}`);
-        return false;
-      }
-      
-      // 품절, 오더중 상태도 제외
-      const normalizedStatus = stockStatus.toLowerCase();
-      if (normalizedStatus === '품절' || normalizedStatus === '오더중') {
-        console.log(`필터링됨 - ${stockStatus}: ${item.barcode} - ${item.name}`);
-        return false;
-      }
-      
-      // 확정 상태가 아닌 경우도 제외
-      if (item.status !== '확정') {
-        console.log(`필터링됨 - 미확정: ${item.barcode} - ${item.name}`);
-        return false;
-      }
-      
-      return true;
-    });
-    
-    console.log(`필터링 결과: ${exportItems.length}개 중 ${filteredItems.length}개 내보내기 가능`);
-    
-    // 필터링 후 내보낼 항목이 없으면 중단
-    if (filteredItems.length === 0) {
-      return { 
-        success: false, 
-        message: '내보낼 수 있는 항목이 없습니다. (모든 항목이 미확인, 품절, 오더중 또는 미확정 상태입니다)' 
-      };
-    }
-    
     console.log('CSV 데이터 생성 시작');
-    // 1. CSV 데이터 생성 (필터링된 항목으로)
-    const csvData = createCSVData(filteredItems);
+    // 1. CSV 데이터 생성
+    const csvData = createCSVData(exportItems);
     console.log('CSV 데이터 생성 완료, 길이:', csvData.length);
     
     console.log('파일명 생성 시작');
@@ -62,13 +65,17 @@ function exportToCSV(orderId, exportItems) {
     
     console.log('내보내기 이력 저장 시작');
     // 3. 내보내기 이력 저장
-    const exportRecord = saveExportHistory(orderId, filteredItems, filename);
+    const exportRecord = saveExportHistory(orderId, exportItems, filename);
     console.log('내보내기 이력 저장 완료');
     
     console.log('발주서 상태 업데이트 시작');
+    console.log('exportItems 샘플:', exportItems.slice(0, 3));
     // 4. 발주서에 상태 업데이트
-    updateOrderSheetExportStatus(orderId, filteredItems, exportRecord);
+    updateOrderSheetExportStatus(orderId, exportItems, exportRecord);
     console.log('발주서 상태 업데이트 완료');
+    
+    // 추가 flush로 확실한 저장 보장
+    SpreadsheetApp.flush();
     
     // 5. CSV 내용 반환 (클라이언트에서 다운로드)
     // Date 객체를 문자열로 변환
@@ -76,26 +83,20 @@ function exportToCSV(orderId, exportItems) {
       success: true,
       csvContent: csvData,
       filename: filename,
-      exportedCount: filteredItems.length, // 필터링된 개수
+      exportedCount: exportItems.length,
       exportedAt: exportRecord.exportedAt instanceof Date ? 
         exportRecord.exportedAt.toISOString() : 
         new Date().toISOString(),
       exportId: exportRecord.exportId || exportRecord.id || Utilities.getUuid(),
       // 내보낸 항목들의 정보 추가
-      exportedItems: filteredItems.map(item => ({
+      exportedItems: exportItems.map(item => ({
         id: item.id,
         barcode: item.barcode,
         exportedAt: exportRecord.exportedAt instanceof Date ? 
           exportRecord.exportedAt.toISOString() : 
           new Date().toISOString(),
         exportQuantity: item.exportQuantity || item.quantity
-      })),
-      // 필터링 정보 추가
-      filteredInfo: {
-        original: exportItems.length,
-        exported: filteredItems.length,
-        filtered: exportItems.length - filteredItems.length
-      }
+      }))
     };
     
     return result;
@@ -297,82 +298,219 @@ function createExportHistorySheet(spreadsheet) {
 // 발주서 시트에 내보내기 상태 업데이트
 function updateOrderSheetExportStatus(orderId, exportedItems, exportRecord) {
   try {
+    console.log('=== updateOrderSheetExportStatus 시작 ===');
+    console.log('orderId:', orderId);
+    console.log('exportedItems 수:', exportedItems.length);
+    console.log('첫번째 item 상세:', JSON.stringify(exportedItems[0]));
+    
     const ss = SpreadsheetApp.openById(orderId);
     const sheet = ss.getSheetByName('발주서');
     
-    if (!sheet) return;
+    if (!sheet) {
+      console.error('발주서 시트를 찾을 수 없습니다');
+      return;
+    }
     
     // 데이터 범위 가져오기
     const lastRow = sheet.getLastRow();
-    if (lastRow <= 6) return;
+    if (lastRow <= 6) {
+      console.log('데이터가 없습니다');
+      return;
+    }
     
-    // 17열까지 읽기 (Q열까지)
-    const dataRange = sheet.getRange(7, 1, lastRow - 6, 17);
+    // 19열까지 읽기 (S열까지) - R, S열 포함
+    const lastCol = sheet.getLastColumn();
+    const numCols = Math.max(19, lastCol);
+    const dataRange = sheet.getRange(7, 1, lastRow - 6, numCols);
     const values = dataRange.getValues();
     
     const exportTime = new Date();
     const exportTimeStr = Utilities.formatDate(exportTime, 'GMT+9', 'yyyy-MM-dd HH:mm:ss');
     
-    // 내보낸 항목들의 바코드 맵 생성
-    const exportedMap = new Map();
+    // 바코드로만 매칭 (수량은 변경될 수 있으므로)
+    const exportedBarcodes = new Set();
+    const exportedItemsMap = new Map();
+    
     exportedItems.forEach(item => {
-      exportedMap.set(item.barcode, {
-        ...item,
-        actualExportQty: item.exportQuantity || item.quantity
+      exportedBarcodes.add(String(item.barcode));
+      exportedItemsMap.set(String(item.barcode), item);
+      console.log('내보내기 항목:', {
+        barcode: item.barcode,
+        id: item.id,
+        quantity: item.quantity,
+        exportQuantity: item.exportQuantity
       });
     });
     
-    // 각 행 업데이트
+    // 업데이트할 데이터를 배치로 준비
+    const batchUpdates = [];
+    let updatedCount = 0;
+    let matchedByBarcode = 0;
+    
     for (let i = 0; i < values.length; i++) {
-      const barcode = String(values[i][0]);
+      const rowNum = 7 + i;
+      const rowBarcode = String(values[i][0] || ''); // A열: 바코드
       
-      if (exportedMap.has(barcode)) {
-        const exportedItem = exportedMap.get(barcode);
-        const rowNum = 7 + i;
+      // 빈 행은 건너뛰기
+      if (!rowBarcode) {
+        continue;
+      }
+      
+      // 이미 내보낸 항목은 건너뛰기 (N열 확인)
+      if (values[i][13]) {
+        console.log(`행 ${rowNum} 건너뛰기 - 이미 내보냄: ${values[i][13]}`);
+        continue;
+      }
+      
+      // 바코드로 매칭
+      if (exportedBarcodes.has(rowBarcode)) {
+        console.log(`행 ${rowNum} 매칭 성공 - 바코드: ${rowBarcode}`);
         
-        // N열(14번째): 내보내기 시간
-        sheet.getRange(rowNum, 14).setValue(exportTimeStr);
+        batchUpdates.push({
+          row: rowNum,
+          barcode: rowBarcode
+        });
         
-        // O열(15번째): CSV 확인
-        sheet.getRange(rowNum, 15).setValue('✓');
+        updatedCount++;
+        matchedByBarcode++;
         
-        // Q열(17번째): 실제출고수량 - 새로 추가
-        sheet.getRange(rowNum, 17).setValue(exportedItem.actualExportQty);
-        
-        // 셀 포맷 설정
-        sheet.getRange(rowNum, 14).setNumberFormat('@'); // 텍스트 형식
-        sheet.getRange(rowNum, 15).setHorizontalAlignment('center'); // 가운데 정렬
-        sheet.getRange(rowNum, 17).setNumberFormat('0'); // 숫자 형식
+        // 매칭된 항목 제거 (중복 방지)
+        exportedBarcodes.delete(rowBarcode);
       }
     }
     
-    // 헤더 확인 및 추가
-    const headers = sheet.getRange(6, 1, 1, 17).getValues()[0];
+    console.log(`=== 업데이트 결과 ===`);
+    console.log(`총 ${updatedCount}개 행 업데이트 예정`);
+    console.log(`바코드 매칭: ${matchedByBarcode}개`);
     
-    if (headers[13] !== '내보내기시간' && headers[13] === '') {
+    // 배치 업데이트 실행
+    if (batchUpdates.length > 0) {
+      console.log(`=== N, O열 업데이트 시작 ===`);
+      console.log(`업데이트 행 수: ${batchUpdates.length}`);
+      console.log(`내보내기 시간: ${exportTimeStr}`);
+      
+      // 방법 1: 개별 셀 업데이트 (더 안정적)
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (let i = 0; i < batchUpdates.length; i++) {
+        const update = batchUpdates[i];
+        try {
+          // N열(14번째): 내보내기 시간
+          const nCell = sheet.getRange(update.row, 14);
+          nCell.setNumberFormat('@'); // 텍스트 형식으로 먼저 설정
+          nCell.setValue(exportTimeStr);
+          
+          // O열(15번째): CSV 확인
+          const oCell = sheet.getRange(update.row, 15);
+          oCell.setValue('✓');
+          
+          successCount++;
+          
+          // 10개마다 저장
+          if (successCount % 10 === 0) {
+            SpreadsheetApp.flush();
+            console.log(`${successCount}개 업데이트 완료...`);
+          }
+        } catch (e) {
+          failCount++;
+          console.error(`행 ${update.row} 업데이트 실패:`, e);
+        }
+      }
+      
+      // 최종 저장
+      SpreadsheetApp.flush();
+      console.log(`업데이트 완료: 성공 ${successCount}개, 실패 ${failCount}개`);
+      
+      // 대체 방법: 범위로 한 번에 업데이트
+      if (failCount > 0) {
+        console.log('실패한 항목 재시도...');
+        try {
+          // 모든 업데이트 행의 N, O열을 한 번에 가져오기
+          const minRow = Math.min(...batchUpdates.map(u => u.row));
+          const maxRow = Math.max(...batchUpdates.map(u => u.row));
+          const range = sheet.getRange(minRow, 14, maxRow - minRow + 1, 2);
+          const values = range.getValues();
+          
+          // 업데이트할 행에만 값 설정
+          batchUpdates.forEach(update => {
+            const rowIndex = update.row - minRow;
+            values[rowIndex][0] = exportTimeStr; // N열
+            values[rowIndex][1] = '✓'; // O열
+          });
+          
+          // 한 번에 설정
+          range.setValues(values);
+          SpreadsheetApp.flush();
+          console.log('범위 업데이트 완료');
+        } catch (e) {
+          console.error('범위 업데이트도 실패:', e);
+        }
+      }
+      
+      // 추가 안정성을 위한 지연
+      Utilities.sleep(1000);
+      SpreadsheetApp.flush();
+      
+      // 업데이트 확인을 위해 다시 읽기
+      console.log('=== 업데이트 검증 시작 ===');
+      const verifyRange = sheet.getRange(7, 14, lastRow - 6, 2);
+      const verifyValues = verifyRange.getValues();
+      let verifiedCount = 0;
+      let nColumnEmpty = 0;
+      let oColumnEmpty = 0;
+      
+      // 업데이트된 행만 확인
+      batchUpdates.forEach(update => {
+        const rowIndex = update.row - 7;
+        if (rowIndex >= 0 && rowIndex < verifyValues.length) {
+          const nValue = String(verifyValues[rowIndex][0] || '').trim();
+          const oValue = String(verifyValues[rowIndex][1] || '').trim();
+          
+          if (nValue === exportTimeStr && oValue === '✓') {
+            verifiedCount++;
+          } else {
+            if (!nValue) nColumnEmpty++;
+            if (!oValue) oColumnEmpty++;
+            console.log(`행 ${update.row}: N열="${nValue}", O열="${oValue}"`);
+          }
+        }
+      });
+      
+      console.log(`검증 결과: ${verifiedCount}/${batchUpdates.length}개 정상 업데이트`);
+      if (nColumnEmpty > 0) console.log(`N열 비어있음: ${nColumnEmpty}개`);
+      if (oColumnEmpty > 0) console.log(`O열 비어있음: ${oColumnEmpty}개`);
+    } else {
+      console.error('⚠️ 업데이트된 항목이 없습니다!');
+      console.log('매칭 실패한 바코드들:', Array.from(exportedBarcodes));
+    }
+    
+    // 헤더 확인 및 추가 (19열까지)
+    const headers = sheet.getRange(6, 1, 1, 19).getValues()[0];
+    
+    // N열 헤더 설정
+    if (!headers[13] || headers[13] === '') {
       sheet.getRange(6, 14).setValue('내보내기시간');
       sheet.getRange(6, 14).setFontWeight('bold');
       sheet.getRange(6, 14).setBackground('#f0f0f0');
     }
     
-    if (headers[14] !== 'CSV확인' && headers[14] === '') {
+    // O열 헤더 설정
+    if (!headers[14] || headers[14] === '') {
       sheet.getRange(6, 15).setValue('CSV확인');
       sheet.getRange(6, 15).setFontWeight('bold');
       sheet.getRange(6, 15).setBackground('#f0f0f0');
     }
     
-    if (headers[15] !== '박스번호' && headers[15] === '') {
+    // P열 헤더 설정
+    if (!headers[15] || headers[15] === '') {
       sheet.getRange(6, 16).setValue('박스번호');
       sheet.getRange(6, 16).setFontWeight('bold');
       sheet.getRange(6, 16).setBackground('#f0f0f0');
     }
     
-    // Q열 헤더 추가
-    if (headers[16] !== '실제출고수량' && headers[16] === '') {
-      sheet.getRange(6, 17).setValue('실제출고수량');
-      sheet.getRange(6, 17).setFontWeight('bold');
-      sheet.getRange(6, 17).setBackground('#f0f0f0');
-    }
+    // Q열 헤더는 이미 '출고가능수량'으로 설정되어 있으므로 변경하지 않음
+    // Q열은 출고가능수량을 표시하는 열이며, CSV 내보내기 시에도 유지됨
     
   } catch (error) {
     console.error('발주서 상태 업데이트 실패:', error);
@@ -386,21 +524,22 @@ function getExportHistory(orderId) {
     const ss = SpreadsheetApp.openById(orderId);
     const historySheet = ss.getSheetByName('내보내기이력');
     
-    if (!historySheet) return [];
+    if (!historySheet) {
+      return [];
+    }
     
-    const lastRow = historySheet.getLastRow();
-    if (lastRow <= 1) return [];
-    
-    const data = historySheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    const data = historySheet.getDataRange().getValues();
     const history = [];
     
-    // 최근 10개만 반환
-    for (let i = data.length - 1; i >= 0 && history.length < 10; i--) {
+    // 최근 10개만 반환 (역순)
+    for (let i = Math.max(1, data.length - 10); i < data.length; i++) {
       if (data[i][0]) {
-        history.push({
-          exportedAt: data[i][0],
-          exportedBy: data[i][1],
-          itemCount: data[i][2]
+        history.unshift({
+          id: data[i][0],
+          exportedAt: data[i][1],
+          exportedBy: data[i][2],
+          filename: data[i][3],
+          itemCount: data[i][4]
         });
       }
     }
@@ -410,6 +549,110 @@ function getExportHistory(orderId) {
   } catch (error) {
     console.error('내보내기 이력 조회 실패:', error);
     return [];
+  }
+}
+
+// 내보내기 상태 초기화
+function resetExportStatus(orderId) {
+  try {
+    if (!orderId) {
+      return { success: false, message: '발주서 ID가 필요합니다.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(orderId);
+    const sheet = ss.getSheetByName('발주서');
+    
+    if (!sheet) {
+      return { success: false, message: '발주서를 찾을 수 없습니다.' };
+    }
+    
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 6) {
+      return { success: true, message: '초기화할 항목이 없습니다.' };
+    }
+    
+    // N열(14열)과 O열(15열) 초기화 - 내보내기 시간과 상태
+    const exportTimeRange = sheet.getRange(7, 14, lastRow - 6, 1);
+    const exportStatusRange = sheet.getRange(7, 15, lastRow - 6, 1);
+    
+    // 빈 값으로 초기화
+    exportTimeRange.clearContent();
+    exportStatusRange.clearContent();
+    
+    // 내보내기 이력도 초기화 (선택적)
+    const historySheet = ss.getSheetByName('내보내기이력');
+    if (historySheet) {
+      const historyLastRow = historySheet.getLastRow();
+      if (historyLastRow > 1) {
+        // 헤더를 제외한 모든 데이터 삭제
+        historySheet.deleteRows(2, historyLastRow - 1);
+      }
+    }
+    
+    // 메타데이터 업데이트
+    const now = Utilities.formatDate(new Date(), 'GMT+9', 'yyyy-MM-dd HH:mm:ss');
+    sheet.getRange(4, 11).setValue('초기화:').setFontWeight('bold');
+    sheet.getRange(4, 12).setValue(now);
+    
+    return { 
+      success: true, 
+      message: '내보내기 상태가 초기화되었습니다.',
+      clearedCount: lastRow - 6
+    };
+    
+  } catch (error) {
+    console.error('내보내기 상태 초기화 실패:', error);
+    return { 
+      success: false, 
+      message: '초기화 중 오류가 발생했습니다: ' + error.toString() 
+    };
+  }
+}
+
+// N열 업데이트 디버그 함수
+function debugUpdateExportTime(orderId, barcode, exportTime) {
+  try {
+    const ss = SpreadsheetApp.openById(orderId);
+    const sheet = ss.getSheetByName('발주서');
+    
+    if (!sheet) {
+      return { success: false, message: '발주서를 찾을 수 없습니다.' };
+    }
+    
+    const lastRow = sheet.getLastRow();
+    const data = sheet.getRange(7, 1, lastRow - 6, 1).getValues();
+    
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === String(barcode)) {
+        const row = 7 + i;
+        const nCell = sheet.getRange(row, 14);
+        
+        console.log(`행 ${row}에서 바코드 ${barcode} 찾음`);
+        console.log(`현재 N열 값: "${nCell.getValue()}"`);
+        console.log(`현재 형식: ${nCell.getNumberFormat()}`);
+        
+        // 텍스트 형식으로 설정
+        nCell.setNumberFormat('@');
+        nCell.setValue(exportTime || new Date().toISOString());
+        SpreadsheetApp.flush();
+        
+        // 다시 읽기
+        const newValue = nCell.getValue();
+        console.log(`업데이트 후 N열 값: "${newValue}"`);
+        
+        return {
+          success: true,
+          row: row,
+          oldValue: data[i][13] || '',
+          newValue: newValue
+        };
+      }
+    }
+    
+    return { success: false, message: '바코드를 찾을 수 없습니다.' };
+  } catch (error) {
+    console.error('디버그 업데이트 실패:', error);
+    return { success: false, message: error.toString() };
   }
 }
 
