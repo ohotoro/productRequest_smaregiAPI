@@ -74,6 +74,7 @@ const AppState = {
   smaregiData: {},
   smaregiUploadTime: null,
   smaregiDataLoaded: false,
+  isNewOrder: false, // 새로운 발주서 여부 추가
   uploadedCSVContent: null,
   uploadedSmaregiContent: null,
   currentStockEditItem: null,
@@ -976,6 +977,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // 발주서 정보 설정
     if (orderInfo) {
+      console.log('발주서 정보:', orderInfo);
       AppState.currentOrderInfo = orderInfo;
       updateOrderStatus();
       enableOrderFeatures();
@@ -995,49 +997,20 @@ document.addEventListener('DOMContentLoaded', async function() {
       console.error('SmaregiData 로드 실패:', error);
     });
     
-    // 발주서가 있으면 스마트 로드
+    // 발주서가 있으면 발주 항목 로드 (백업 버전처럼 단순하게)
     if (orderInfo) {
-      // 로컬 스토리지 확인
-      const lastState = localStorage.getItem('lastWorkingState');
-      let shouldAutoLoad = true;
-      
-      if (lastState) {
-        const saved = JSON.parse(lastState);
-        // 같은 발주서이고 최근 작업한 경우
-        if (saved.orderInfo.orderId === orderInfo.orderId) {
-          const timeDiff = Date.now() - new Date(saved.lastSaved).getTime();
-          const hourInMs = 60 * 60 * 1000;
-          
-          // 1시간 이내 작업한 경우 자동 로드
-          if (timeDiff < hourInMs) {
-            shouldAutoLoad = true;
-          } else {
-            // 1시간 이상 지난 경우 확인
-            shouldAutoLoad = confirm('이전에 작업하던 발주서입니다. 자동으로 불러오시겠습니까?');
-          }
-        }
-      }
-      
-      // 서버에 데이터가 있는 경우에만 자동 로드
-      if (shouldAutoLoad && orderInfo.hasData) {
-        updateLoadingMessage('발주 항목 로드 중...');
-        dataPromises.push(
-          loadOrderItemsFromSheetAsync()
-            .then(items => {
-              console.log('발주 항목 로드 완료:', items ? items.length : 0);
-              // 발주 목록이 로드되면 즉시 UI 업데이트
-              updateOrderList();
-              updateOrderSummary();
-              saveLastWorkingState(); // 상태 저장
-              return items;
-            })
-        );
-      } else if (!orderInfo.hasData) {
-        // 데이터가 없는 빈 발주서
-        AppState.orderItems = [];
-        updateOrderList();
-        console.log('새로운 발주서입니다.');
-      }
+      updateLoadingMessage('발주 항목 로드 중...');
+      dataPromises.push(
+        loadOrderItemsFromSheetAsync()
+          .then(items => {
+            console.log('발주 항목 로드 완료:', items ? items.length : 0);
+            // 발주 목록이 로드되면 즉시 UI 업데이트
+            updateOrderList();
+            updateOrderSummary();
+            saveLastWorkingState(); // 상태 저장
+            return items;
+          })
+      );
     }
     
     // 모든 데이터 로드 완료 대기
@@ -2203,6 +2176,7 @@ function createOrderWithUndelivered(recipientName, undeliveredItems) {
       if (result.success) {
         AppState.currentOrderInfo = result.orderInfo;
         AppState.orderItems = [];
+        AppState.isNewOrder = true; // 새로운 발주서 표시
         clearSession();
         
         updateOrderStatus();
@@ -2278,6 +2252,7 @@ function createOrderNormal(recipientName) {
       if (result.success) {
         AppState.currentOrderInfo = result.orderInfo;
         AppState.orderItems = [];
+        AppState.isNewOrder = true; // 새로운 발주서 표시
         clearSession();
         
         updateOrderStatus();
@@ -2443,6 +2418,7 @@ function openExistingOrder(orderId) {
       if (result?.success) {
         AppState.currentOrderInfo = result.orderInfo;
         AppState.orderItems = result.items || [];
+        AppState.isNewOrder = false; // 기존 발주서 열기
         
         updateOrderStatus();
         enableOrderFeatures();
@@ -4151,17 +4127,8 @@ function performAutoSave() {
     return;
   }
   
-  // 빈 배열 저장 방지 + 서버 상태 확인
+  // 빈 배열 저장 방지
   if (!AppState.orderItems || AppState.orderItems.length === 0) {
-    // 서버에 데이터가 있는지 확인
-    google.script.run
-      .withSuccessHandler(function(orderInfo) {
-        if (orderInfo && orderInfo.hasData) {
-          console.warn('서버에 데이터가 있지만 로컬은 비어있음. 자동 저장 건너뜀.');
-          showWarning('발주서 데이터를 먼저 불러와주세요.');
-        }
-      })
-      .getCurrentOrder();
     return;
   }
   
@@ -4189,7 +4156,7 @@ function performAutoSave() {
       showSaveIndicator('hide');
       console.error('자동 저장 실패:', error);
     })
-    .saveToOrderSheet(AppState.orderItems);
+    .saveToOrderSheetWithVersion(AppState.orderItems);
 }
 
 // 재고 상태 단축키 처리 함수
@@ -4334,6 +4301,12 @@ function mergeProtectedFields(serverItems) {
   
   // 로컬 아이템 업데이트
   AppState.orderItems.forEach((localItem, localIndex) => {
+    // 새로 추가된 항목은 merge 대상에서 제외 (id가 timestamp 기반인 경우)
+    // 서버 데이터의 id는 row index 기반이므로 숫자가 작음
+    if (localItem.id > 1000000000000) {  // timestamp 기반 id는 매우 큰 숫자
+      return;
+    }
+    
     const serverItemsForBarcode = serverMap.get(localItem.barcode);
     if (!serverItemsForBarcode) return;
     
